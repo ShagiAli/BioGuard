@@ -23,6 +23,28 @@ free Postgres hard-expires 30 days after creation and is then deleted.
 People have lost data assuming free meant permanent. Put the database
 somewhere that persists.
 
+### If you use Supabase
+
+Two things to know.
+
+**Free projects pause after 7 days of inactivity.** The data is kept,
+but the project goes offline until you resume it from the dashboard —
+about thirty seconds, but not something to discover five minutes before
+showing the demo to someone. Visit the app once a week, or accept the
+resume step.
+
+**Use the Session pooler connection string.** The direct connection is
+IPv6-only on the free tier; the poolers provide IPv4, which is what most
+hosting platforms use. The transaction pooler interferes with prepared
+statements unless Prisma is configured for it, so session mode is the
+one to take.
+
+**Do not enable Supabase Auth, Storage or RLS for this project.**
+BioGuard has its own authentication and its own permission model, which
+are among the things it exists to demonstrate. Use Supabase purely as a
+Postgres host — that also keeps a future move to any other provider a
+connection-string change rather than a rewrite.
+
 **Application: Render's free web service.** It is the only mainstream
 platform with a genuine free tier left — Railway and Fly.io both moved
 to trial or usage-based models. Free web services get 750 instance-hours
@@ -61,8 +83,9 @@ DEMO_PASSWORD=<whatever the seed printed>
 ## Steps
 
 1. Create a Postgres database on Neon or Supabase. Copy the connection
-   string; for Supabase use the **Session Mode** string, which is the
-   one compatible with Prisma.
+   string; for Supabase use the **Session pooler** string, not the
+   direct connection — the poolers are what provide IPv4, and most PaaS
+   hosts connect over IPv4.
 2. On Render, create a **Web Service** from the GitHub repository,
    environment **Docker**, using the root `Dockerfile`.
 3. Set the environment variables above. Generate the secret with
