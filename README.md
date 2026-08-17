@@ -1,0 +1,212 @@
+# BioGuard
+
+**Preventive maintenance management for hospital biomedical engineering departments.**
+
+Hospitals run thousands of medical devices, each needing scheduled
+servicing on its own cycle. Tracking that in spreadsheets works until it
+doesn't: a ventilator's service slips by three weeks, nobody notices,
+and there is no record of when the schedule started drifting. BioGuard
+is an equipment inventory with a preventive maintenance engine that
+escalates on its own and keeps an auditable trail of every schedule
+change.
+
+Built with TypeScript, Express 5, PostgreSQL 18, Prisma and React 19.
+
+---
+
+## The interesting problem
+
+Most of this application is ordinary CRUD. One part is not, and it is
+where the design effort went.
+
+**When maintenance is completed late, what happens to the schedule?**
+
+Two obvious answers are both wrong:
+
+- *Always re-base onto the completion date.* A 90-day device serviced
+  two weeks late every cycle drifts forward eight weeks a year. After
+  three years "quarterly" means nothing, and no signal was ever raised.
+- *Always keep the original anchor.* Service a device 25 days late and
+  its next service falls 65 days later instead of 90 — punishing the
+  technician for the delay and servicing the device before it needs it.
+
+BioGuard uses a **grace window**, defaulting to 20% of the interval.
+Work completed inside the window keeps the original anchor, so the
+schedule stays stable through ordinary delays. Work completed outside it
+re-bases onto the completion date **and records that a re-base
+happened** — because a re-base is the signal that the programme is
+slipping, and it should be visible in reporting rather than quietly
+absorbed. Devices governed by an external certificate can be set to a
+hard anchor that never re-bases.
+
+That rule lives in [`server/src/scheduler/rules.ts`](server/src/scheduler/rules.ts)
+as pure functions taking the reference date as an argument. Nothing in
+it reads the clock or touches the database, which is what lets the same
+code run as a nightly job, as a test, and as a demo control that jumps
+forward in time — with no test-only branches.
+
+## Architecture
+
+```
+docs/prototype.jsx   standalone UI prototype the rules were validated against
+web/                 React 19 · Vite · Tailwind v4 · TanStack Query
+  └── /api proxied to the server, so the session cookie is first-party
+
+server/
+  src/app.ts         Express assembly — mountable by tests
+  src/index.ts       process bootstrap: socket, scheduler, shutdown
+  src/middleware/    session loading, role checks, query scoping
+  src/modules/       auth · equipment · maintenance · admin
+  src/scheduler/
+      rules.ts       pure scheduling logic, no I/O
+      job.ts         pg-boss wiring for the nightly sweep
+  src/lib/           prisma · logger · email · audit · security
+  prisma/schema.prisma
+
+PostgreSQL 18        uuidv7 primary keys, pg-boss queue in its own schema
+Mailpit              catches outgoing mail in development
+```
+
+### Decisions worth explaining
+
+**`nextDueAt` is a stored, indexed column, not derived on read.** The
+nightly sweep must be one indexed range scan rather than a computation
+across the whole estate. Storing it also preserves historical due dates:
+deriving them from the current interval would silently rewrite history
+whenever an interval changed.
+
+**Reminder idempotency is a database constraint, not application
+logic.** A unique index on `(equipmentId, dueDate, threshold)` is what
+guarantees a reminder sends once. The sweep inserts with
+`skipDuplicates`, so a day already processed is an ordinary no-op and
+two workers racing produce one email, not two.
+
+**Operational status and maintenance state are separate.** A device can
+be under repair *and* overdue for preventive maintenance at the same
+time — those are two independent facts. A single status enum would force
+one to overwrite the other.
+
+**Sessions are database-backed, not JWTs.** Stateless tokens cannot be
+revoked, which means a departed employee stays authenticated until
+expiry. Wrong trade for a hospital.
+
+**QR codes encode an opaque token, not the asset tag.** Asset tags are
+sequential; a QR carrying one would let anyone who photographs a single
+label enumerate the entire estate through the public scan endpoint.
+
+**Corrective work does not reset the preventive clock.** Fixing a broken
+sensor is not the scheduled service and must not buy the device another
+cycle.
+
+## Testing
+
+```bash
+npm test              # scheduling rules — pure, no database
+npm run test:integration   # full API against real PostgreSQL
+```
+
+**12 unit tests** cover the grace window in both directions, the
+reminder ladder firing on its rungs and staying silent between them, and
+calendar arithmetic across DST boundaries.
+
+**16 integration tests** run against a real database rather than mocks,
+because the design leans on database constraints and mocking them would
+verify nothing. They assert properties, not just outputs:
+
+- an engineer sees one department, an administrator sees the estate
+- an out-of-scope device returns 404, not 403 — a 403 confirms it exists
+- a wrong password and an unknown account produce identical responses
+- the QR token never appears in a list or detail payload
+- unknown request keys are rejected outright
+- running the scheduler twice over the same dates sends nothing the
+  second time
+
+CI runs lint, typecheck, format check, both suites against a PostgreSQL
+service container, and a frontend build.
+
+## Running it
+
+Requires **Node 22+** and **Docker**.
+
+```bash
+docker compose up -d               # PostgreSQL 18 + Mailpit
+
+cd server
+cp .env.example .env               # then set SESSION_SECRET
+npm install
+npm run db:migrate                 # name it "init"
+npm run db:seed                    # 184 devices; prints logins once
+npm run dev                        # API on :4000
+
+cd ../web
+npm install
+npm run dev                        # UI on :5173
+```
+
+Generate a session secret with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+```
+
+The server refuses to start without one — no secret gets a fallback
+default. The seed generates passwords rather than shipping any, so there
+is no default account in this repository.
+
+| Command | |
+| --- | --- |
+| `npm run db:studio` | browse the data in a UI |
+| `npm run lint` / `typecheck` / `format` | quality gates |
+| `docker compose down -v` | wipe the database |
+
+### Everything in containers
+
+```bash
+export POSTGRES_PASSWORD=... SESSION_SECRET=...
+docker compose -f docker-compose.prod.yml up --build
+```
+
+Serves the built frontend on :8080 with the API behind the same origin.
+Migrations run on start, so a fresh deployment converges without manual
+steps. Both images are multi-stage: the runtime layers carry no
+compiler, no dev dependencies and no source.
+
+Mailpit's inbox is at **http://localhost:8025**.
+
+### Seeing the reminder engine work
+
+A maintenance reminder system does its work once a month at 02:00, which
+makes it nearly impossible to demonstrate. Signing in as an
+administrator exposes a control that replays the real nightly sweep
+forward across future dates, against real data. The emails that arrive
+in Mailpit are exactly the ones that would have been sent — the same
+`runSweep()` the cron job calls, not a mock. Press it twice and the
+second run sends nothing, which is the idempotency constraint working.
+
+## Security
+
+Detailed in [SECURITY.md](SECURITY.md). In brief: argon2id password
+hashing at the OWASP baseline, revocable database-backed sessions in
+`SameSite=Strict` cookies, hashed reset tokens with single use,
+account lockout, strict Zod schemas that reject unknown keys, a
+centralised query scope that makes IDOR structurally difficult, an audit
+writer with a per-entity field allowlist so password hashes cannot reach
+the log, and helmet with a real CSP.
+
+This is a defensible posture for a project of this scope. Deployment
+into a hospital would additionally need penetration testing, monitoring
+and alerting on sweep failure, backups, and sign-off from someone
+accountable for it.
+
+## Not built
+
+Repair tickets, calibration records, spare parts inventory, document
+upload, MTBF and MTTR analytics, criticality scoring and replacement
+recommendations. The schema and module layout accommodate each without
+rework; they were left out deliberately in favour of building the
+maintenance engine properly.
+
+On MTBF specifically: it needs per-device operating hours, which
+hospitals rarely record. Computing it from calendar time produces a
+number that looks authoritative and misleads. Failure rate per
+device-year is the honest metric for the data available.

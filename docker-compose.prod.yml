@@ -1,0 +1,53 @@
+# Full stack in containers: docker compose -f docker-compose.prod.yml up
+#
+# Reads secrets from the environment rather than baking them in. Set
+# POSTGRES_PASSWORD and SESSION_SECRET before running.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bioguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: bioguard
+    volumes:
+      - bioguard-prod-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bioguard"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      DATABASE_URL: postgresql://bioguard:${POSTGRES_PASSWORD}@db:5432/bioguard?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      MAIL_DRIVER: ${MAIL_DRIVER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-mail}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+    # Migrations run on start so a fresh deployment converges without a
+    # manual step.
+    command: sh -c "npx prisma migrate deploy && node dist/src/index.js"
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "8080:80"
+
+  mail:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+
+volumes:
+  bioguard-prod-data:

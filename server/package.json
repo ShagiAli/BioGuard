@@ -1,0 +1,63 @@
+{
+  "name": "bioguard-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/src/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,json,md}\"",
+    "test": "vitest run",
+    "test:integration": "cross-env TEST_SCOPE=integration vitest run",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "db:seed:prod": "node dist/prisma/seed.js"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.2.1",
+    "argon2": "0.41.1",
+    "cookie-parser": "1.4.7",
+    "cors": "2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "express-rate-limit": "7.4.1",
+    "helmet": "8.0.0",
+    "nodemailer": "^9.0.5",
+    "pg-boss": "10.1.5",
+    "pino": "9.5.0",
+    "pino-http": "10.3.0",
+    "qrcode": "1.5.4",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/cookie-parser": "1.4.8",
+    "@types/cors": "2.8.17",
+    "@types/express": "5.0.0",
+    "@types/node": "22.10.2",
+    "@types/nodemailer": "^8.0.1",
+    "@types/qrcode": "1.5.5",
+    "@types/supertest": "^6.0.2",
+    "cross-env": "^7.0.3",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "prisma": "6.2.1",
+    "supertest": "^7.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "5.7.2",
+    "typescript-eslint": "^8.18.1",
+    "vitest": "^4.1.10"
+  }
+}

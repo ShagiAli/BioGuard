@@ -1,0 +1,36 @@
+# Everything BioGuard needs locally. No cloud account, no cost.
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: bioguard-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bioguard
+      POSTGRES_PASSWORD: bioguard_dev_only
+      POSTGRES_DB: bioguard
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18 images expect a single mount at /var/lib/postgresql and
+      # place the cluster in a version-specific subdirectory inside it.
+      # Mounting at /var/lib/postgresql/data is the pre-18 convention and
+      # makes the container refuse to start.
+      - bioguard-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bioguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Catches every outgoing email so reminders can be demonstrated
+  # without sending anything to a real person. Inbox: localhost:8025
+  mail:
+    image: axllent/mailpit:latest
+    container_name: bioguard-mail
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  bioguard-data:

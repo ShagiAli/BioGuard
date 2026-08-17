@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    name: Server — lint, typecheck, test
+    runs-on: ubuntu-latest
+
+    # The integration suite runs against a real Postgres, not a mock.
+    # Anything less would not exercise the constraints the design leans
+    # on: the unique index behind reminder idempotency, and the foreign
+    # keys behind scoping.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: bioguard
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: bioguard_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bioguard"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://bioguard:ci@localhost:5432/bioguard_test?schema=public
+      SESSION_SECRET: ci-session-secret-not-used-anywhere-real-000000
+      APP_URL: http://localhost:5173
+      MAIL_DRIVER: log
+      NODE_ENV: test
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Apply migrations
+        run: npm run db:deploy
+
+      - name: Integration tests
+        run: npm run test:integration
+
+  web:
+    name: Web — typecheck and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build

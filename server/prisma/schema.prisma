@@ -1,0 +1,292 @@
+// BioGuard — biomedical equipment maintenance management
+//
+// Design notes that are easy to lose later:
+//   * nextDueAt is a stored, indexed column, never derived on read. The
+//     nightly scheduler must be one indexed query, not a full scan.
+//   * operationalStatus has no "maintenance due" member. Due state is
+//     derived from nextDueAt, so a device can be under repair AND
+//     overdue at the same time, which is the truth.
+//   * NotificationDispatch is the idempotency table. Its unique
+//     constraint is the only thing stopping duplicate reminders.
+//   * publicToken, not the asset tag, is what a QR code encodes. Asset
+//     tags are sequential and would let anyone enumerate the estate.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  ENGINEER
+  STAFF
+  MANAGER
+}
+
+enum Criticality {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum OperationalStatus {
+  OPERATIONAL
+  UNDER_MAINTENANCE
+  UNDER_REPAIR
+  AWAITING_PARTS
+  OUT_OF_SERVICE
+  RETIRED
+}
+
+enum ScheduleMode {
+  GRACE
+  ANCHORED
+}
+
+enum IntervalSource {
+  MANUFACTURER
+  HOSPITAL_POLICY
+  RISK_BASED
+}
+
+enum MaintenanceType {
+  PREVENTIVE
+  CORRECTIVE
+  EMERGENCY
+  CALIBRATION
+  INSPECTION
+  SAFETY_TEST
+}
+
+enum NotifyLevel {
+  INFO
+  WARNING
+  URGENT
+  DUE
+  OVERDUE
+}
+
+// ---------------------------------------------------------------- users
+
+model User {
+  id                String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  email             String    @unique
+  passwordHash      String
+  fullName          String
+  role              Role
+  departmentId      String?   @db.Uuid
+  department        Department? @relation(fields: [departmentId], references: [id])
+  isActive          Boolean   @default(true)
+  // Brute-force controls
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  // Any session issued before this instant is rejected.
+  passwordChangedAt DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions          Session[]
+  resetTokens       PasswordResetToken[]
+  assignedEquipment Equipment[]         @relation("ResponsibleEngineer")
+  maintenanceLogged MaintenanceRecord[]
+  notifications     Notification[]
+  auditEntries      AuditLog[]
+
+  @@index([role, isActive])
+}
+
+model Session {
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // SHA-256 of the cookie value. The raw token is never stored, so a
+  // database leak does not hand over live sessions.
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ------------------------------------------------------------ locations
+
+model Department {
+  id        String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name      String      @unique
+  equipment Equipment[]
+  users     User[]
+}
+
+model Building {
+  id    String @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name  String @unique
+  rooms Room[]
+}
+
+model Room {
+  id         String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  buildingId String      @db.Uuid
+  building   Building    @relation(fields: [buildingId], references: [id])
+  floor      Int
+  code       String
+  equipment  Equipment[]
+
+  @@unique([buildingId, floor, code])
+}
+
+// ------------------------------------------------------------ equipment
+
+model EquipmentCategory {
+  id              String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name            String      @unique
+  defaultInterval Int
+  equipment       Equipment[]
+}
+
+model Manufacturer {
+  id        String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name      String      @unique
+  equipment Equipment[]
+}
+
+model Equipment {
+  id             String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  tag            String            @unique // BG-EQ-000123, for humans
+  publicToken    String            @unique // opaque, what the QR encodes
+  assetNo        String            @unique
+  name           String
+  categoryId     String            @db.Uuid
+  category       EquipmentCategory @relation(fields: [categoryId], references: [id])
+  manufacturerId String            @db.Uuid
+  manufacturer   Manufacturer      @relation(fields: [manufacturerId], references: [id])
+  model          String
+  serialNo       String
+
+  departmentId String     @db.Uuid
+  department   Department @relation(fields: [departmentId], references: [id])
+  roomId       String?    @db.Uuid
+  room         Room?      @relation(fields: [roomId], references: [id])
+
+  criticality       Criticality
+  operationalStatus OperationalStatus @default(OPERATIONAL)
+  engineerId        String?           @db.Uuid
+  engineer          User?             @relation("ResponsibleEngineer", fields: [engineerId], references: [id])
+
+  // --- maintenance schedule ---
+  intervalDays      Int
+  intervalSource    IntervalSource @default(MANUFACTURER)
+  scheduleMode      ScheduleMode   @default(GRACE)
+  graceDaysOverride Int?
+  lastCompletedAt   DateTime?      @db.Date
+  nextDueAt         DateTime?      @db.Date
+
+  installedAt    DateTime? @db.Date
+  purchasedAt    DateTime? @db.Date
+  purchasePrice  Decimal?  @db.Decimal(12, 2)
+  warrantyEndsAt DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  maintenance   MaintenanceRecord[]
+  dispatches    NotificationDispatch[]
+  notifications Notification[]
+
+  @@index([nextDueAt])
+  @@index([departmentId, operationalStatus])
+  @@index([criticality, nextDueAt])
+}
+
+model MaintenanceRecord {
+  id          String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  equipmentId String          @db.Uuid
+  equipment   Equipment       @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  type        MaintenanceType
+  completedOn DateTime        @db.Date
+  engineerId  String          @db.Uuid
+  engineer    User            @relation(fields: [engineerId], references: [id])
+
+  problem       String?
+  findings      String?
+  workPerformed String
+  cost          Decimal? @db.Decimal(12, 2)
+  downtimeHours Int      @default(0)
+
+  // Schedule audit. Without these four you can see that work happened
+  // but not whether the programme is slipping.
+  satisfiedDueDate DateTime? @db.Date
+  latenessDays     Int?
+  rebased          Boolean   @default(false)
+  nextDueAfter     DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+
+  @@index([equipmentId, completedOn])
+}
+
+// -------------------------------------------------------- notifications
+
+model NotificationDispatch {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  equipmentId String    @db.Uuid
+  equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  dueDate     DateTime  @db.Date
+  threshold   Int
+  sentAt      DateTime  @default(now())
+
+  @@unique([equipmentId, dueDate, threshold])
+}
+
+model Notification {
+  id          String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  recipientId String      @db.Uuid
+  recipient   User        @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  equipmentId String?     @db.Uuid
+  equipment   Equipment?  @relation(fields: [equipmentId], references: [id])
+  level       NotifyLevel
+  title       String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime    @default(now())
+
+  @@index([recipientId, readAt])
+}
+
+// ------------------------------------------------------------ audit log
+
+model AuditLog {
+  id        String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  actorId   String?  @db.Uuid
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String   @db.Uuid
+  // Field allowlist output only. Never a whole row: User rows carry
+  // passwordHash and it must not reach this table.
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([createdAt])
+}

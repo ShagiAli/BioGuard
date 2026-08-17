@@ -1,0 +1,14 @@
+{
+  // Build config, separate from the typecheck config above.
+  //
+  // `npm run typecheck` covers everything including tests. The build
+  // must not emit tests into the shipped image, but it does need the
+  // seed script, so rootDir stays at the project root and the source
+  // layout is preserved in dist: dist/src/index.js, dist/prisma/seed.js.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts", "prisma/seed.ts"],
+  "exclude": ["tests", "dist", "node_modules"]
+}
