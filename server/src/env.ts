@@ -22,6 +22,16 @@ const schema = z.object({
   SMTP_HOST: z.string().default("localhost"),
   SMTP_PORT: z.coerce.number().default(1025),
   MAIL_FROM: z.string().default("BioGuard <noreply@bioguard.local>"),
+  // Single-origin deployment: the API also serves the built frontend
+  // from ./public. Keeps the session cookie first-party, which
+  // SameSite=Strict requires.
+  SERVE_WEB: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // Shown on the login screen of a public demo so a reviewer can get in.
+  DEMO_EMAIL: z.string().optional(),
+  DEMO_PASSWORD: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

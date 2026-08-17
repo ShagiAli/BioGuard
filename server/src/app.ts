@@ -15,6 +15,8 @@ import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import path from "node:path";
+import fs from "node:fs";
 
 import { env, isProd } from "./env.js";
 import { logger } from "./lib/logger.js";
@@ -116,6 +118,46 @@ export function createApp() {
     });
     res.status(204).end();
   });
+
+  // Public demo credentials, if this deployment advertises them.
+  app.get("/api/demo-credentials", (_req, res) => {
+    res.json(
+      env.DEMO_EMAIL && env.DEMO_PASSWORD
+        ? { email: env.DEMO_EMAIL, password: env.DEMO_PASSWORD }
+        : {}
+    );
+  });
+
+  app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
+
+  /**
+   * Single-origin mode. Serving the built frontend from the API keeps
+   * the session cookie first-party, which is what SameSite=Strict
+   * requires — hosting the two on separate domains would make the
+   * browser drop the cookie on every request.
+   */
+  if (env.SERVE_WEB) {
+    const webRoot = path.resolve(process.cwd(), "public");
+    const indexHtml = path.join(webRoot, "index.html");
+
+    app.use(
+      express.static(webRoot, {
+        // Hashed asset filenames can be cached hard; index.html cannot,
+        // or clients pin themselves to a stale build.
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith("index.html")) res.setHeader("Cache-Control", "no-cache");
+          else res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        },
+      })
+    );
+
+    // Client-side routing: any unmatched GET is React Router's problem.
+    app.use((req, res, next) => {
+      if (req.method !== "GET") return next();
+      if (!fs.existsSync(indexHtml)) return next();
+      res.sendFile(indexHtml);
+    });
+  }
 
   app.use((_req, res) => res.status(404).json({ error: "Not found." }));
 

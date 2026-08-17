@@ -1,0 +1,19 @@
+# Normalise line endings. Without this, files written on Windows arrive
+# in Linux containers with CRLF, which breaks shell scripts and any file
+# an interpreter reads line by line — with an error message that never
+# mentions line endings.
+* text=auto eol=lf
+
+# Files that must stay LF regardless of platform.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary: never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
