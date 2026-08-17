@@ -31,12 +31,20 @@ interface Seeded {
 
 let seeded: Seeded;
 
-async function login(email: string, password = PASSWORD) {
-  const res = await request(app)
-    .post("/api/auth/login")
-    .send({ email, password })
-    .expect(200);
-  return res.headers["set-cookie"];
+/**
+ * Signs in and returns the session cookie.
+ *
+ * `set-cookie` is typed as possibly absent, which is honest — a login
+ * that returns 200 without a cookie would be a real bug. Asserting it
+ * here means every caller gets a defined value and a missing cookie
+ * fails loudly at the point it happens.
+ */
+async function login(email: string, password = PASSWORD): Promise<string[]> {
+  const res = await request(app).post("/api/auth/login").send({ email, password }).expect(200);
+
+  const raw = res.headers["set-cookie"] as string[] | string | undefined;
+  expect(raw, "login returned no session cookie").toBeDefined();
+  return Array.isArray(raw) ? raw : [raw as string];
 }
 
 beforeAll(async () => {
@@ -255,7 +263,9 @@ describe("data exposure", () => {
   });
 
   it("serves the public scan endpoint without a session, minimally", async () => {
-    const res = await request(app).get("/api/equipment/public/test-token-own-000000001").expect(200);
+    const res = await request(app)
+      .get("/api/equipment/public/test-token-own-000000001")
+      .expect(200);
 
     expect(res.body.assetNo).toBe("T9001");
     // Nothing beyond what somebody standing at the bedside needs.

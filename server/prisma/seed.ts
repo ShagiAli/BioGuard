@@ -49,8 +49,16 @@ const CATEGORIES = [
 ] as const;
 
 const MANUFACTURERS = [
-  "Dräger", "Philips", "GE Healthcare", "Mindray", "Siemens Healthineers",
-  "Nihon Kohden", "B. Braun", "Fresenius", "Getinge", "Medtronic",
+  "Dräger",
+  "Philips",
+  "GE Healthcare",
+  "Mindray",
+  "Siemens Healthineers",
+  "Nihon Kohden",
+  "B. Braun",
+  "Fresenius",
+  "Getinge",
+  "Medtronic",
 ] as const;
 
 const DEPARTMENTS = [
@@ -176,8 +184,15 @@ async function main() {
 
   // --- equipment ---------------------------------------------------
   const statuses = [
-    "OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OPERATIONAL",
-    "OPERATIONAL", "OPERATIONAL", "UNDER_REPAIR", "AWAITING_PARTS", "OUT_OF_SERVICE",
+    "OPERATIONAL",
+    "OPERATIONAL",
+    "OPERATIONAL",
+    "OPERATIONAL",
+    "OPERATIONAL",
+    "OPERATIONAL",
+    "UNDER_REPAIR",
+    "AWAITING_PARTS",
+    "OUT_OF_SERVICE",
   ] as const;
 
   for (let i = 0; i < 184; i++) {

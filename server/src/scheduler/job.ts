@@ -91,7 +91,10 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
     sent++;
   }
 
-  logger.info({ date: day.toISOString().slice(0, 10), scanned: candidates.length, sent }, "sweep complete");
+  logger.info(
+    { date: day.toISOString().slice(0, 10), scanned: candidates.length, sent },
+    "sweep complete"
+  );
   return { date: day.toISOString().slice(0, 10), scanned: candidates.length, sent };
 }
 
