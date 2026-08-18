@@ -21,7 +21,7 @@ CREATE TYPE "NotifyLevel" AS ENUM ('INFO', 'WARNING', 'URGENT', 'DUE', 'OVERDUE'
 
 -- CreateTable
 CREATE TABLE "User" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "email" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "fullName" TEXT NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE "User" (
 
 -- CreateTable
 CREATE TABLE "Session" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "tokenHash" TEXT NOT NULL,
     "expiresAt" TIMESTAMP(3) NOT NULL,
@@ -53,7 +53,7 @@ CREATE TABLE "Session" (
 
 -- CreateTable
 CREATE TABLE "PasswordResetToken" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "tokenHash" TEXT NOT NULL,
     "expiresAt" TIMESTAMP(3) NOT NULL,
@@ -65,7 +65,7 @@ CREATE TABLE "PasswordResetToken" (
 
 -- CreateTable
 CREATE TABLE "Department" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "name" TEXT NOT NULL,
 
     CONSTRAINT "Department_pkey" PRIMARY KEY ("id")
@@ -73,7 +73,7 @@ CREATE TABLE "Department" (
 
 -- CreateTable
 CREATE TABLE "Building" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "name" TEXT NOT NULL,
 
     CONSTRAINT "Building_pkey" PRIMARY KEY ("id")
@@ -81,7 +81,7 @@ CREATE TABLE "Building" (
 
 -- CreateTable
 CREATE TABLE "Room" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "buildingId" UUID NOT NULL,
     "floor" INTEGER NOT NULL,
     "code" TEXT NOT NULL,
@@ -91,7 +91,7 @@ CREATE TABLE "Room" (
 
 -- CreateTable
 CREATE TABLE "EquipmentCategory" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "name" TEXT NOT NULL,
     "defaultInterval" INTEGER NOT NULL,
 
@@ -100,7 +100,7 @@ CREATE TABLE "EquipmentCategory" (
 
 -- CreateTable
 CREATE TABLE "Manufacturer" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "name" TEXT NOT NULL,
 
     CONSTRAINT "Manufacturer_pkey" PRIMARY KEY ("id")
@@ -108,7 +108,7 @@ CREATE TABLE "Manufacturer" (
 
 -- CreateTable
 CREATE TABLE "Equipment" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "tag" TEXT NOT NULL,
     "publicToken" TEXT NOT NULL,
     "assetNo" TEXT NOT NULL,
@@ -140,7 +140,7 @@ CREATE TABLE "Equipment" (
 
 -- CreateTable
 CREATE TABLE "MaintenanceRecord" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "equipmentId" UUID NOT NULL,
     "type" "MaintenanceType" NOT NULL,
     "completedOn" DATE NOT NULL,
@@ -161,7 +161,7 @@ CREATE TABLE "MaintenanceRecord" (
 
 -- CreateTable
 CREATE TABLE "NotificationDispatch" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "equipmentId" UUID NOT NULL,
     "dueDate" DATE NOT NULL,
     "threshold" INTEGER NOT NULL,
@@ -172,7 +172,7 @@ CREATE TABLE "NotificationDispatch" (
 
 -- CreateTable
 CREATE TABLE "Notification" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "recipientId" UUID NOT NULL,
     "equipmentId" UUID,
     "level" "NotifyLevel" NOT NULL,
@@ -186,7 +186,7 @@ CREATE TABLE "Notification" (
 
 -- CreateTable
 CREATE TABLE "AuditLog" (
-    "id" UUID NOT NULL DEFAULT uuidv7(),
+    "id" UUID NOT NULL,
     "actorId" UUID,
     "action" TEXT NOT NULL,
     "entity" TEXT NOT NULL,
