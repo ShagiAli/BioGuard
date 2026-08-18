@@ -25,7 +25,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+
+  // Not every response is JSON. A proxy timeout or an HTML error page
+  // would otherwise throw a parse error and surface as "could not reach
+  // the server", hiding what actually happened.
+  let data: { error?: string } | null = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    if (!res.ok) throw new ApiError(res.status, text.slice(0, 200) || res.statusText);
+    throw new ApiError(res.status, "The server returned an unexpected response.");
+  }
 
   if (!res.ok) {
     throw new ApiError(res.status, data?.error ?? "Something went wrong.");

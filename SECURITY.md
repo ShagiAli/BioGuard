@@ -86,6 +86,28 @@ not start. `.env` is gitignored; only `.env.example` is committed. The
 seed generates passwords and prints them once rather than shipping
 credentials in source.
 
+## Deployment settings that change the security posture
+
+**`TRUST_PROXY_HOPS` must match the real number of proxies.** Express
+derives `req.ip` by walking back through `X-Forwarded-For` by that many
+hops. Set it too low and `req.ip` is the proxy's address, so every
+client behind that proxy shares one rate-limit bucket — the limiter
+still reports numbers and protects nobody. Set it too high and a client
+can prepend its own value and choose its apparent address. On Render
+behind Cloudflare the chain is three, so `TRUST_PROXY_HOPS=3`.
+
+Because that value is a judgement about infrastructure rather than
+something the app can verify, the protections that do not depend on it
+carry the real weight: the per-account login limiter keys on the
+submitted email, and account lockout after five failures is enforced in
+the database. Neither can be evaded by forging a header.
+
+**`NODE_ENV=development` exposes error details in responses.** The
+error handler includes the exception message and a stack excerpt only
+under that exact value, not merely "not production" — so a deployment
+that loses its `NODE_ENV` variable fails closed and keeps quiet rather
+than publishing internals.
+
 ## Known limits
 
 This has not been penetration tested or reviewed by a security

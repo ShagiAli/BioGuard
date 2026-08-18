@@ -63,7 +63,13 @@ DATABASE_URL=postgresql://...              # from Neon or Supabase
 SESSION_SECRET=<48 random bytes, base64>
 SERVE_WEB=true
 MAIL_DRIVER=log
+TRUST_PROXY_HOPS=3                         # Render behind Cloudflare
 ```
+
+`TRUST_PROXY_HOPS` is not cosmetic. Left at the default of 1, `req.ip`
+resolves to a Cloudflare address shared by many users, so every
+IP-based rate limit buckets unrelated clients together and protects
+nobody while still reporting healthy numbers.
 
 **`MAIL_DRIVER=log` matters.** Every seeded engineer has an
 `@bioguard.local` address, which does not exist. Pointing a real SMTP
