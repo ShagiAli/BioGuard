@@ -32,6 +32,11 @@ const schema = z.object({
   // Shown on the login screen of a public demo so a reviewer can get in.
   DEMO_EMAIL: z.string().optional(),
   DEMO_PASSWORD: z.string().optional(),
+  // Number of reverse proxies in front of the app. Wrong values break
+  // rate limiting silently: too low and every client shares one bucket
+  // behind the proxy's address, too high and clients can spoof their
+  // own address through X-Forwarded-For. Render behind Cloudflare is 3.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
 });
 
 const parsed = schema.safeParse(process.env);

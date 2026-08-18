@@ -49,9 +49,17 @@ export function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * A dummy hash used to keep failed logins the same cost as successful
- * ones. Without it, response timing tells an attacker which email
- * addresses exist.
+ * A real argon2 hash of a random value, used to keep a login for an
+ * unknown account as expensive as one for a real account.
+ *
+ * This must be a genuine hash. A hand-written placeholder fails to
+ * parse and argon2.verify rejects it in microseconds, while a real
+ * verification takes tens of milliseconds — which is exactly the timing
+ * difference the defence exists to remove. Computed once, on first use.
  */
-export const DUMMY_HASH =
-  "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHR2YWx1ZQ$0000000000000000000000000000000000000000000";
+let dummy: Promise<string> | null = null;
+
+export function dummyHash(): Promise<string> {
+  if (!dummy) dummy = hashPassword(generateToken(24));
+  return dummy;
+}

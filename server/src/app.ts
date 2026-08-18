@@ -31,7 +31,9 @@ export function createApp() {
   const app = express();
 
   app.disable("x-powered-by");
-  app.set("trust proxy", 1);
+  // Must match the real number of proxies, or req.ip is not the client
+  // and every IP-based limit buckets unrelated users together.
+  app.set("trust proxy", env.TRUST_PROXY_HOPS);
 
   app.use(
     helmet({
@@ -173,12 +175,12 @@ export function createApp() {
       // wasted time.
       res.status(500).json({
         error: `Something went wrong. Quote reference ${id} if you report it.`,
-        ...(isProd
-          ? {}
-          : {
+        ...(env.NODE_ENV === "development"
+          ? {
               detail: err instanceof Error ? err.message : String(err),
               stack: err instanceof Error ? err.stack?.split("\n").slice(0, 6) : undefined,
-            }),
+            }
+          : {}),
       });
     }
   );

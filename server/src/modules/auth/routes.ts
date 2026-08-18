@@ -6,7 +6,7 @@ import { env, isProd } from "../../env.js";
 import { logger } from "../../lib/logger.js";
 import { sendMail } from "../../lib/email.js";
 import {
-  DUMMY_HASH,
+  dummyHash,
   generateToken,
   hashPassword,
   hashToken,
@@ -33,11 +33,14 @@ const LOCK_MINUTES = 15;
  * Both are needed. IP-only is defeated by a botnet; account-only lets
  * one attacker lock every user out of the hospital.
  */
+const TOO_MANY = { error: "Too many attempts. Wait a few minutes and try again." };
+
 const loginIpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  message: TOO_MANY,
 });
 
 const loginAccountLimiter = rateLimit({
@@ -46,9 +49,10 @@ const loginAccountLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => String(req.body?.email ?? "unknown").toLowerCase(),
+  message: TOO_MANY,
 });
 
-const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5 });
+const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, message: TOO_MANY });
 
 function setSessionCookie(res: import("express").Response, token: string) {
   res.cookie(SESSION_COOKIE, token, {
@@ -83,7 +87,9 @@ authRouter.post("/login", loginIpLimiter, loginAccountLimiter, async (req, res) 
   const invalid = () => res.status(401).json({ error: "Email or password is incorrect." });
 
   if (!user) {
-    await verifyPassword(DUMMY_HASH, password);
+    // Same work as a real verification, so response time does not
+    // reveal whether the address is registered.
+    await verifyPassword(await dummyHash(), password);
     return invalid();
   }
 
