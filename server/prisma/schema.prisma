@@ -278,6 +278,21 @@ model Notification {
   @@index([recipientId, readAt])
 }
 
+/// Delivered mail, kept so recipients can read what was sent without a
+/// real mailbox. The "db" mail driver writes here instead of to SMTP,
+/// which also avoids sending to the fictional @bioguard.local addresses
+/// the demo data uses.
+model SentEmail {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  to        String
+  subject   String
+  body      String
+  sentAt    DateTime @default(now())
+  readAt    DateTime?
+
+  @@index([to, sentAt])
+}
+
 // ------------------------------------------------------------ audit log
 
 model AuditLog {

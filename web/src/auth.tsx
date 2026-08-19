@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type User } from "./lib/api";
 import { Button } from "./components/ui";
@@ -108,10 +109,16 @@ export function Login() {
 
           {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
 
-          <div className="mt-4">
+          <div className="mt-4 flex items-center justify-between gap-3">
             <Button onClick={submit} disabled={busy || !email || !password}>
               {busy ? "Signing in…" : "Sign in"}
             </Button>
+            <Link
+              to="/forgot-password"
+              className="text-sm text-slate-500 underline hover:text-slate-800"
+            >
+              Forgot password?
+            </Link>
           </div>
         </div>
 

@@ -120,6 +120,39 @@ export function createApp() {
     res.status(204).end();
   });
 
+  /**
+   * Delivered mail for the signed-in user.
+   *
+   * Reminders are addressed to the engineer responsible for a device.
+   * Oversight roles see the whole outbox, the same way they see the
+   * whole notification stream — otherwise the administrator who runs
+   * the sweep can never see what it produced.
+   */
+  app.get("/api/mail", requireAuth, async (req, res) => {
+    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
+
+    const rows = await prisma.sentEmail.findMany({
+      where: oversees ? {} : { to: req.user!.email },
+      orderBy: { sentAt: "desc" },
+      take: 100,
+    });
+
+    res.json({
+      rows,
+      unread: rows.filter((r) => !r.readAt).length,
+      scope: oversees ? "all" : "own",
+    });
+  });
+
+  app.post("/api/mail/read-all", requireAuth, async (req, res) => {
+    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
+    await prisma.sentEmail.updateMany({
+      where: oversees ? { readAt: null } : { to: req.user!.email, readAt: null },
+      data: { readAt: new Date() },
+    });
+    res.status(204).end();
+  });
+
   // Public demo credentials, if this deployment advertises them.
   app.get("/api/demo-credentials", (_req, res) => {
     res.json(

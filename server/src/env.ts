@@ -18,7 +18,7 @@ const schema = z.object({
   TIMEZONE: z.string().default("Europe/Istanbul"),
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
-  MAIL_DRIVER: z.enum(["smtp", "log"]).default("smtp"),
+  MAIL_DRIVER: z.enum(["smtp", "log", "db"]).default("smtp"),
   SMTP_HOST: z.string().default("localhost"),
   SMTP_PORT: z.coerce.number().default(1025),
   MAIL_FROM: z.string().default("BioGuard <noreply@bioguard.local>"),

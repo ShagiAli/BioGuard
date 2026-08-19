@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Boxes, Clock, LayoutDashboard, LogOut, RotateCcw } from "lucide-react";
+import { Bell, Boxes, Clock, LayoutDashboard, LogOut, Mail, RotateCcw } from "lucide-react";
 import { api, titleCase, type Notification } from "../lib/api";
 import { useAuth } from "../auth";
 
@@ -15,10 +15,17 @@ export function Layout({ children }: { children: ReactNode }) {
     refetchInterval: 60_000,
   });
 
+  const mail = useQuery({
+    queryKey: ["mail"],
+    queryFn: () => api.get<{ rows: unknown[]; unread: number }>("/api/mail"),
+    refetchInterval: 60_000,
+  });
+
   const nav = [
     { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
     { to: "/equipment", label: "Equipment", icon: Boxes, end: false },
     { to: "/notifications", label: "Notifications", icon: Bell, end: false, count: data?.unread },
+    { to: "/mail", label: "Mail", icon: Mail, end: false, count: mail.data?.unread },
   ];
 
   return (
@@ -101,6 +108,10 @@ function SimulateBar() {
     qc.invalidateQueries({ queryKey: ["summary"] });
     qc.invalidateQueries({ queryKey: ["equipment"] });
     qc.invalidateQueries({ queryKey: ["attention"] });
+    // The sweep writes mail as well as notifications. Without this the
+    // Mail page only catches up on its 60-second poll, which reads as
+    // the app being slow.
+    qc.invalidateQueries({ queryKey: ["mail"] });
   };
 
   const simulate = useMutation({
@@ -112,7 +123,7 @@ function SimulateBar() {
           ? `No new reminders were due through ${data.through}. Every rung in that range has already been sent — press Reset to replay it.`
           : `${data.notificationsSent} reminder${
               data.notificationsSent === 1 ? "" : "s"
-            } sent, through ${data.through}. Open the notification centre, or the Mailpit inbox at localhost:8025.`
+            } sent, through ${data.through}. Read them under Notifications, or Mail to see the messages as delivered.`
       );
       refresh();
     },

@@ -62,7 +62,7 @@ APP_URL=https://your-app.onrender.com     # must match the real URL
 DATABASE_URL=postgresql://...              # from Neon or Supabase
 SESSION_SECRET=<48 random bytes, base64>
 SERVE_WEB=true
-MAIL_DRIVER=log
+MAIL_DRIVER=db
 TRUST_PROXY_HOPS=3                         # Render behind Cloudflare
 ```
 
@@ -71,7 +71,13 @@ resolves to a Cloudflare address shared by many users, so every
 IP-based rate limit buckets unrelated clients together and protects
 nobody while still reporting healthy numbers.
 
-**`MAIL_DRIVER=log` matters.** Every seeded engineer has an
+**`MAIL_DRIVER=db` stores each message so recipients can read it in the
+app, under Mail.** That is what makes the reminder engine visible on a
+public demo without sending anything.
+
+The alternative, `log`, discards messages after writing a line. What you
+must not do is point real SMTP at this deployment: every seeded engineer
+has an `@bioguard.local` address that does not exist. Every seeded engineer has an
 `@bioguard.local` address, which does not exist. Pointing a real SMTP
 provider at those and running the scheduler would send dozens of
 messages to invalid recipients — a fast way to get an account
