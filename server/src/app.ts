@@ -58,8 +58,7 @@ export function createApp() {
     app.use(
       pinoHttp({
         logger,
-        genReqId: (req: IncomingMessage) =>
-          (req.headers["x-request-id"] as string) ?? randomUUID(),
+        genReqId: (req: IncomingMessage) => (req.headers["x-request-id"] as string) ?? randomUUID(),
       })
     );
   }
@@ -138,7 +137,11 @@ export function createApp() {
       take: 100,
     });
 
-    res.json({ rows, unread: rows.filter((r) => !r.readAt).length, scope: oversees ? "all" : "own" });
+    res.json({
+      rows,
+      unread: rows.filter((r) => !r.readAt).length,
+      scope: oversees ? "all" : "own",
+    });
   });
 
   app.post("/api/mail/read-all", requireAuth, async (req, res) => {
@@ -195,12 +198,7 @@ export function createApp() {
   // Errors are logged in full and reported in outline. A stack trace in
   // a response body is a map of the application for anyone probing it.
   app.use(
-    (
-      err: unknown,
-      req: express.Request,
-      res: express.Response,
-      _next: express.NextFunction
-    ) => {
+    (err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
       const id = (req as { id?: string }).id ?? randomUUID();
       logger.error({ err, reqId: id }, "unhandled error");
 
