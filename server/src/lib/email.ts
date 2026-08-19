@@ -25,6 +25,29 @@ const transport =
     ? nodemailer.createTransport({ host: env.SMTP_HOST, port: env.SMTP_PORT, secure: false })
     : null;
 
+/**
+ * Batched delivery. The db driver writes every message in one insert,
+ * which matters for the sweep: one round trip instead of one per
+ * recipient, and the difference is minutes when the database is on
+ * another continent.
+ */
+export async function sendMailMany(mails: Mail[]): Promise<void> {
+  if (mails.length === 0) return;
+
+  try {
+    if (env.MAIL_DRIVER === "db") {
+      await prisma.sentEmail.createMany({
+        data: mails.map((m) => ({ to: m.to, subject: m.subject, body: m.text })),
+      });
+      return;
+    }
+    // SMTP has no batch equivalent; send them one at a time.
+    for (const mail of mails) await sendMail(mail);
+  } catch (err) {
+    logger.error({ err, count: mails.length }, "batch mail delivery failed");
+  }
+}
+
 export async function sendMail(mail: Mail): Promise<void> {
   try {
     if (env.MAIL_DRIVER === "db") {

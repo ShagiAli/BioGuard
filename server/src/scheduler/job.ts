@@ -10,7 +10,7 @@
 import PgBoss from "pg-boss";
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
-import { sendMail } from "../lib/email.js";
+import { sendMailMany } from "../lib/email.js";
 import { env } from "../env.js";
 import { addDays, thresholdFor, toDay } from "./rules.js";
 
@@ -31,6 +31,7 @@ export interface SweepResult {
  */
 export async function runSweep(onDate: Date): Promise<SweepResult> {
   const day = toDay(onDate);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
 
   const candidates = await prisma.equipment.findMany({
     where: {
@@ -43,56 +44,96 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
     },
   });
 
-  let sent = 0;
-
-  for (const device of candidates) {
+  // Which devices earn a reminder today.
+  const due = candidates.flatMap((device) => {
     const threshold = thresholdFor(device.nextDueAt, day);
-    if (!threshold || !device.nextDueAt) continue;
+    return threshold && device.nextDueAt ? [{ device, threshold, dueDate: device.nextDueAt }] : [];
+  });
 
-    // The idempotency guarantee. The unique constraint on
-    // (equipmentId, dueDate, threshold) is what actually enforces
-    // "once". skipDuplicates lets the database refuse the insert
-    // without raising, so a day already swept is an ordinary no-op
-    // rather than a caught exception — and a concurrent worker losing
-    // the race behaves the same way.
-    const inserted = await prisma.notificationDispatch.createMany({
-      data: [{ equipmentId: device.id, dueDate: device.nextDueAt, threshold: threshold.at }],
-      skipDuplicates: true,
-    });
+  if (due.length === 0) {
+    logger.info({ date: iso(day), scanned: candidates.length, sent: 0 }, "sweep complete");
+    return { date: iso(day), scanned: candidates.length, sent: 0 };
+  }
 
-    if (inserted.count === 0) continue; // already sent for this due date and rung
+  /**
+   * Which of those have already been sent.
+   *
+   * One query for the whole day rather than an insert-and-catch per
+   * device. The unique constraint on NotificationDispatch remains the
+   * guarantee — this is the fast path, not the correctness mechanism,
+   * and skipDuplicates below still refuses anything that slips through
+   * between the read and the write.
+   */
+  const already = await prisma.notificationDispatch.findMany({
+    where: {
+      equipmentId: { in: due.map((d) => d.device.id) },
+      dueDate: { in: [...new Set(due.map((d) => d.dueDate.getTime()))].map((t) => new Date(t)) },
+    },
+    select: { equipmentId: true, dueDate: true, threshold: true },
+  });
 
+  const sentKey = (equipmentId: string, dueDate: Date, threshold: number) =>
+    `${equipmentId}|${iso(dueDate)}|${threshold}`;
+
+  const seen = new Set(already.map((a) => sentKey(a.equipmentId, a.dueDate, a.threshold)));
+  const fresh = due.filter(
+    (d) => !seen.has(sentKey(d.device.id, d.dueDate, d.threshold.at))
+  );
+
+  if (fresh.length === 0) {
+    logger.info({ date: iso(day), scanned: candidates.length, sent: 0 }, "sweep complete");
+    return { date: iso(day), scanned: candidates.length, sent: 0 };
+  }
+
+  const messages = fresh.map(({ device, threshold, dueDate }) => {
     const title = `${device.name} (${device.assetNo}) — maintenance ${threshold.label}`;
     const body =
       `Preventive maintenance for ${device.name}, asset ${device.assetNo}, ` +
       `in ${device.department.name} is ${threshold.label}. ` +
-      `Scheduled date: ${device.nextDueAt.toISOString().slice(0, 10)}.`;
+      `Scheduled date: ${iso(dueDate)}.`;
+    return { device, threshold, dueDate, title, body };
+  });
 
-    if (device.engineer) {
-      await prisma.notification.create({
-        data: {
-          recipientId: device.engineer.id,
-          equipmentId: device.id,
-          level: threshold.level,
-          title,
-          body,
-        },
-      });
+  // Three writes for the whole day, whatever the device count.
+  await prisma.$transaction([
+    prisma.notificationDispatch.createMany({
+      data: messages.map((m) => ({
+        equipmentId: m.device.id,
+        dueDate: m.dueDate,
+        threshold: m.threshold.at,
+      })),
+      skipDuplicates: true,
+    }),
+    prisma.notification.createMany({
+      data: messages
+        .filter((m) => m.device.engineer)
+        .map((m) => ({
+          recipientId: m.device.engineer!.id,
+          equipmentId: m.device.id,
+          level: m.threshold.level,
+          title: m.title,
+          body: m.body,
+        })),
+    }),
+  ]);
 
-      // Deliberately thin: device, date, and a link. No findings, no
-      // costs — an inbox is not a system we control.
-      await sendMail({
-        to: device.engineer.email,
-        subject: title,
-        text: `${body}\n\nOpen in BioGuard: ${env.APP_URL}/equipment/${device.id}`,
-      });
-    }
+  // Deliberately thin: device, date and a link. No findings, no costs —
+  // an inbox is not a system we control.
+  await sendMailMany(
+    messages
+      .filter((m) => m.device.engineer)
+      .map((m) => ({
+        to: m.device.engineer!.email,
+        subject: m.title,
+        text: `${m.body}\n\nOpen in BioGuard: ${env.APP_URL}/equipment/${m.device.id}`,
+      }))
+  );
 
-    sent++;
-  }
-
-  logger.info({ date: day.toISOString().slice(0, 10), scanned: candidates.length, sent }, "sweep complete");
-  return { date: day.toISOString().slice(0, 10), scanned: candidates.length, sent };
+  logger.info(
+    { date: iso(day), scanned: candidates.length, sent: messages.length },
+    "sweep complete"
+  );
+  return { date: iso(day), scanned: candidates.length, sent: messages.length };
 }
 
 /** Advances through a date range one day at a time so no threshold is skipped. */
