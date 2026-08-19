@@ -1,6 +1,16 @@
+[![CI](https://github.com/ShagiAli/BioGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/ShagiAli/BioGuard/actions/workflows/ci.yml)
+
 # BioGuard
 
 **Preventive maintenance management for hospital biomedical engineering departments.**
+
+**[Live demo](https://bioguard-5cx9.onrender.com)** — credentials
+available on request.
+
+> The first request may take about a minute: the demo runs on a free
+> instance that sleeps when idle. All data is fictional — Northfield
+> Teaching Hospital does not exist, and no real patient or device
+> information is present.
 
 Hospitals run thousands of medical devices, each needing scheduled
 servicing on its own cycle. Tracking that in spreadsheets works until it
@@ -10,7 +20,9 @@ is an equipment inventory with a preventive maintenance engine that
 escalates on its own and keeps an auditable trail of every schedule
 change.
 
-Built with TypeScript, Express 5, PostgreSQL 18, Prisma and React 19.
+Built with TypeScript, Express 5, PostgreSQL, Prisma and React 19.
+
+![Dashboard](docs/dashboard.png)
 
 ---
 
@@ -66,6 +78,12 @@ server/
 PostgreSQL           UUIDv7 primary keys, pg-boss queue in its own schema
 Mailpit              catches outgoing mail in development
 ```
+
+Mail has three transports, chosen by `MAIL_DRIVER`: `smtp` for a real
+server or Mailpit, `db` to store messages so recipients read them inside
+the app, and `log` to discard them. The public demo runs on `db` — every
+seeded engineer has an `@bioguard.local` address that does not exist, so
+sending would produce nothing but bounces.
 
 ### Decisions worth explaining
 
@@ -186,10 +204,25 @@ Mailpit's inbox is at **http://localhost:8025**.
 A maintenance reminder system does its work once a month at 02:00, which
 makes it nearly impossible to demonstrate. Signing in as an
 administrator exposes a control that replays the real nightly sweep
-forward across future dates, against real data. The emails that arrive
-in Mailpit are exactly the ones that would have been sent — the same
-`runSweep()` the cron job calls, not a mock. Press it twice and the
+forward across future dates, against real data. Reminders appear in the
+notification centre, and the messages themselves under **Mail** — the
+same `runSweep()` the cron job calls, not a mock. Press it twice and the
 second run sends nothing, which is the idempotency constraint working.
+
+Each sweep is four queries per day regardless of fleet size: read the
+candidates, read what has already been sent, one transaction for the
+dispatches and notifications, one batched insert for the mail.
+
+## Deploying
+
+[DEPLOYMENT.md](DEPLOYMENT.md) covers a zero-cost public deployment:
+Supabase for Postgres, Render for the application, and a root
+`Dockerfile` that builds the frontend and serves it from the API.
+
+That single-origin arrangement is not tidiness. The session cookie is
+`SameSite=Strict`, so a frontend on one domain calling an API on another
+would have the cookie silently dropped by the browser — login appears to
+succeed and everything after it returns 401.
 
 ## Security
 
@@ -213,6 +246,10 @@ upload, MTBF and MTTR analytics, criticality scoring and replacement
 recommendations. The schema and module layout accommodate each without
 rework; they were left out deliberately in favour of building the
 maintenance engine properly.
+
+QR codes are generated and the public scan endpoint works, but the
+frontend has no route for the scan target yet, so scanning a printed
+label does not open the device page.
 
 On MTBF specifically: it needs per-device operating hours, which
 hospitals rarely record. Computing it from calendar time produces a
