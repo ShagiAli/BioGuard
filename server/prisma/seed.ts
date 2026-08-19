@@ -2,10 +2,15 @@
  * Seeds a fictional hospital. Deterministic, so the demo shows the same
  * numbers every time it is reset.
  *
- * No password is hardcoded. If SEED_ADMIN_PASSWORD is unset, one is
- * generated and printed once — a repository containing admin/admin123
- * is a repository that ships with a back door.
+ * No password is hardcoded. If SEED_ADMIN_PASSWORD and
+ * SEED_DEMO_PASSWORD are unset, random ones are generated and printed
+ * once — a repository containing admin/admin123 ships with a back door.
+ *
+ * Set both in .env to get stable logins every time, which is what a
+ * public demo wants: the credentials are published anyway, and a
+ * reviewer following the README should not find them changed.
  */
+import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { generateToken, hashPassword } from "../src/lib/security.js";
 
@@ -49,16 +54,8 @@ const CATEGORIES = [
 ] as const;
 
 const MANUFACTURERS = [
-  "Dräger",
-  "Philips",
-  "GE Healthcare",
-  "Mindray",
-  "Siemens Healthineers",
-  "Nihon Kohden",
-  "B. Braun",
-  "Fresenius",
-  "Getinge",
-  "Medtronic",
+  "Dräger", "Philips", "GE Healthcare", "Mindray", "Siemens Healthineers",
+  "Nihon Kohden", "B. Braun", "Fresenius", "Getinge", "Medtronic",
 ] as const;
 
 const DEPARTMENTS = [
@@ -184,15 +181,8 @@ async function main() {
 
   // --- equipment ---------------------------------------------------
   const statuses = [
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "UNDER_REPAIR",
-    "AWAITING_PARTS",
-    "OUT_OF_SERVICE",
+    "OPERATIONAL", "OPERATIONAL", "OPERATIONAL", "OPERATIONAL",
+    "OPERATIONAL", "OPERATIONAL", "UNDER_REPAIR", "AWAITING_PARTS", "OUT_OF_SERVICE",
   ] as const;
 
   for (let i = 0; i < 184; i++) {

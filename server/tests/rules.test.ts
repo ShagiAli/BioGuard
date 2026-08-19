@@ -3,13 +3,7 @@
  * subtly wrong and hard to notice, so they are the part with tests.
  */
 import { describe, expect, it } from "vitest";
-import {
-  daysBetween,
-  graceDays,
-  pmState,
-  recalculateDue,
-  thresholdFor,
-} from "../src/scheduler/rules.js";
+import { daysBetween, graceDays, pmState, recalculateDue, thresholdFor } from "../src/scheduler/rules.js";
 
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
@@ -17,11 +11,7 @@ describe("grace window", () => {
   const base = { scheduleMode: "GRACE" as const, intervalDays: 90 };
 
   it("keeps the original anchor when work is on time", () => {
-    const r = recalculateDue({
-      ...base,
-      previousDue: d("2026-08-14"),
-      completedOn: d("2026-08-14"),
-    });
+    const r = recalculateDue({ ...base, previousDue: d("2026-08-14"), completedOn: d("2026-08-14") });
     expect(r.nextDue.toISOString().slice(0, 10)).toBe("2026-11-12");
     expect(r.rebased).toBe(false);
     expect(r.latenessDays).toBe(0);
@@ -29,32 +19,20 @@ describe("grace window", () => {
 
   it("keeps the anchor for a small delay inside the window", () => {
     // 90-day interval gives an 18-day window; 10 days late stays anchored.
-    const r = recalculateDue({
-      ...base,
-      previousDue: d("2026-08-14"),
-      completedOn: d("2026-08-24"),
-    });
+    const r = recalculateDue({ ...base, previousDue: d("2026-08-14"), completedOn: d("2026-08-24") });
     expect(r.nextDue.toISOString().slice(0, 10)).toBe("2026-11-12");
     expect(r.rebased).toBe(false);
   });
 
   it("re-bases once the delay passes the window", () => {
-    const r = recalculateDue({
-      ...base,
-      previousDue: d("2026-08-14"),
-      completedOn: d("2026-09-15"),
-    });
+    const r = recalculateDue({ ...base, previousDue: d("2026-08-14"), completedOn: d("2026-09-15") });
     expect(r.rebased).toBe(true);
     expect(r.latenessDays).toBe(32);
     expect(r.nextDue.toISOString().slice(0, 10)).toBe("2026-12-14");
   });
 
   it("keeps the anchor when work is done early", () => {
-    const r = recalculateDue({
-      ...base,
-      previousDue: d("2026-08-14"),
-      completedOn: d("2026-08-01"),
-    });
+    const r = recalculateDue({ ...base, previousDue: d("2026-08-14"), completedOn: d("2026-08-01") });
     expect(r.rebased).toBe(false);
     expect(r.latenessDays).toBe(-13);
     expect(r.nextDue.toISOString().slice(0, 10)).toBe("2026-11-12");
