@@ -18,6 +18,7 @@ import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 
+import { z } from "zod";
 import { env, isProd } from "./env.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
@@ -58,7 +59,8 @@ export function createApp() {
     app.use(
       pinoHttp({
         logger,
-        genReqId: (req: IncomingMessage) => (req.headers["x-request-id"] as string) ?? randomUUID(),
+        genReqId: (req: IncomingMessage) =>
+          (req.headers["x-request-id"] as string) ?? randomUUID(),
       })
     );
   }
@@ -137,11 +139,7 @@ export function createApp() {
       take: 100,
     });
 
-    res.json({
-      rows,
-      unread: rows.filter((r) => !r.readAt).length,
-      scope: oversees ? "all" : "own",
-    });
+    res.json({ rows, unread: rows.filter((r) => !r.readAt).length, scope: oversees ? "all" : "own" });
   });
 
   app.post("/api/mail/read-all", requireAuth, async (req, res) => {
@@ -150,6 +148,40 @@ export function createApp() {
       where: oversees ? { readAt: null } : { to: req.user!.email, readAt: null },
       data: { readAt: new Date() },
     });
+    res.status(204).end();
+  });
+
+  /**
+   * Clear read messages. Declared before the :id route so "read" is
+   * never mistaken for an identifier.
+   *
+   * Only read messages go, and only within the caller's scope — an
+   * unread reminder is the one thing a mailbox must not lose.
+   */
+  app.delete("/api/mail/read", requireAuth, async (req, res) => {
+    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
+    const { count } = await prisma.sentEmail.deleteMany({
+      where: oversees
+        ? { readAt: { not: null } }
+        : { to: req.user!.email, readAt: { not: null } },
+    });
+    res.json({ deleted: count });
+  });
+
+  app.delete("/api/mail/:id", requireAuth, async (req, res) => {
+    const parsed = z.string().uuid().safeParse(req.params.id);
+    if (!parsed.success) return res.status(404).json({ error: "Message not found." });
+
+    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
+
+    // deleteMany rather than delete: the scope goes in the where clause,
+    // so a message belonging to someone else matches nothing instead of
+    // being deleted by id alone.
+    const { count } = await prisma.sentEmail.deleteMany({
+      where: oversees ? { id: parsed.data } : { id: parsed.data, to: req.user!.email },
+    });
+
+    if (count === 0) return res.status(404).json({ error: "Message not found." });
     res.status(204).end();
   });
 
@@ -198,7 +230,12 @@ export function createApp() {
   // Errors are logged in full and reported in outline. A stack trace in
   // a response body is a map of the application for anyone probing it.
   app.use(
-    (err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    (
+      err: unknown,
+      req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction
+    ) => {
       const id = (req as { id?: string }).id ?? randomUUID();
       logger.error({ err, reqId: id }, "unhandled error");
 

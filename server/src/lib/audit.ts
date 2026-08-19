@@ -10,18 +10,8 @@ import { logger } from "./logger.js";
 
 const ALLOWED_FIELDS: Record<string, readonly string[]> = {
   Equipment: [
-    "tag",
-    "assetNo",
-    "name",
-    "operationalStatus",
-    "criticality",
-    "departmentId",
-    "roomId",
-    "engineerId",
-    "intervalDays",
-    "scheduleMode",
-    "nextDueAt",
-    "lastCompletedAt",
+    "tag", "assetNo", "name", "operationalStatus", "criticality", "departmentId",
+    "roomId", "engineerId", "intervalDays", "scheduleMode", "nextDueAt", "lastCompletedAt",
   ],
   MaintenanceRecord: ["type", "completedOn", "cost", "downtimeHours", "rebased", "nextDueAfter"],
   User: ["email", "fullName", "role", "departmentId", "isActive"], // never passwordHash

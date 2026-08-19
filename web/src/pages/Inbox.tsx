@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Mail } from "lucide-react";
+import { ChevronDown, ChevronRight, Mail, Trash2 } from "lucide-react";
 import { api, formatDate } from "../lib/api";
 import { Card, ErrorNote, Spinner } from "../components/ui";
 
@@ -23,9 +23,21 @@ export function Inbox() {
       api.get<{ rows: SentEmail[]; unread: number; scope: "all" | "own" }>("/api/mail"),
   });
 
+  const refresh = () => qc.invalidateQueries({ queryKey: ["mail"] });
+
   const markAll = useMutation({
     mutationFn: () => api.post("/api/mail/read-all"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mail"] }),
+    onSuccess: refresh,
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/mail/${id}`),
+    onSuccess: refresh,
+  });
+
+  const clearRead = useMutation({
+    mutationFn: () => api.del<{ deleted: number }>("/api/mail/read"),
+    onSuccess: refresh,
   });
 
   if (query.isLoading) return <Spinner label="Loading mail" />;
@@ -45,12 +57,23 @@ export function Inbox() {
           </p>
         </div>
         {rows.length > 0 && (
-          <button
-            onClick={() => markAll.mutate()}
-            className="cursor-pointer whitespace-nowrap text-sm text-teal-700 hover:text-teal-900"
-          >
-            Mark all as read
-          </button>
+          <div className="flex shrink-0 items-center gap-3">
+            <button
+              onClick={() => markAll.mutate()}
+              className="cursor-pointer whitespace-nowrap text-sm text-teal-700 hover:text-teal-900"
+            >
+              Mark all as read
+            </button>
+            {rows.some((r) => r.readAt) && (
+              <button
+                onClick={() => clearRead.mutate()}
+                disabled={clearRead.isPending}
+                className="cursor-pointer whitespace-nowrap text-sm text-slate-500 hover:text-rose-700 disabled:opacity-50"
+              >
+                Delete read
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -96,6 +119,15 @@ export function Inbox() {
                       <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-700">
                         {m.body}
                       </pre>
+                      <div className="mt-3 flex justify-end border-t border-slate-200 pt-3">
+                        <button
+                          onClick={() => remove.mutate(m.id)}
+                          disabled={remove.isPending}
+                          className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-500 hover:text-rose-700 disabled:opacity-50"
+                        >
+                          <Trash2 size={13} /> Delete this message
+                        </button>
+                      </div>
                     </div>
                   )}
                 </Card>

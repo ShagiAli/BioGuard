@@ -76,7 +76,9 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
     `${equipmentId}|${iso(dueDate)}|${threshold}`;
 
   const seen = new Set(already.map((a) => sentKey(a.equipmentId, a.dueDate, a.threshold)));
-  const fresh = due.filter((d) => !seen.has(sentKey(d.device.id, d.dueDate, d.threshold.at)));
+  const fresh = due.filter(
+    (d) => !seen.has(sentKey(d.device.id, d.dueDate, d.threshold.at))
+  );
 
   if (fresh.length === 0) {
     logger.info({ date: iso(day), scanned: candidates.length, sent: 0 }, "sweep complete");

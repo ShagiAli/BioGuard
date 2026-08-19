@@ -185,18 +185,6 @@ is no default account in this repository.
 | `npm run lint` / `typecheck` / `format` | quality gates |
 | `docker compose down -v` | wipe the database |
 
-### Everything in containers
-
-```bash
-export POSTGRES_PASSWORD=... SESSION_SECRET=...
-docker compose -f docker-compose.prod.yml up --build
-```
-
-Serves the built frontend on :8080 with the API behind the same origin.
-Migrations run on start, so a fresh deployment converges without manual
-steps. Both images are multi-stage: the runtime layers carry no
-compiler, no dev dependencies and no source.
-
 Mailpit's inbox is at **http://localhost:8025**.
 
 ### Seeing the reminder engine work

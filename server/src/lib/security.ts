@@ -11,7 +11,7 @@
  * because the digest is the indexed unique column.
  */
 import argon2 from "argon2";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 const ARGON_OPTIONS = {
   type: argon2.argon2id,
@@ -41,12 +41,6 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
 
 /**
  * A real argon2 hash of a random value, used to keep a login for an
