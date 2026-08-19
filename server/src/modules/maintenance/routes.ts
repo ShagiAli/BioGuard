@@ -11,8 +11,12 @@ const createSchema = z
   .object({
     equipmentId: z.string().uuid(),
     type: z.enum([
-      "PREVENTIVE", "CORRECTIVE", "EMERGENCY",
-      "CALIBRATION", "INSPECTION", "SAFETY_TEST",
+      "PREVENTIVE",
+      "CORRECTIVE",
+      "EMERGENCY",
+      "CALIBRATION",
+      "INSPECTION",
+      "SAFETY_TEST",
     ]),
     completedOn: z.coerce.date(),
     problem: z.string().max(2000).optional(),

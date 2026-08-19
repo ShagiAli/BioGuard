@@ -264,7 +264,9 @@ describe("data exposure", () => {
   });
 
   it("serves the public scan endpoint without a session, minimally", async () => {
-    const res = await request(app).get("/api/equipment/public/test-token-own-000000001").expect(200);
+    const res = await request(app)
+      .get("/api/equipment/public/test-token-own-000000001")
+      .expect(200);
 
     expect(res.body.assetNo).toBe("T9001");
     // Nothing beyond what somebody standing at the bedside needs.

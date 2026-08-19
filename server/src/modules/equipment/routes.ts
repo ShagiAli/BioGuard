@@ -30,8 +30,12 @@ const listQuery = z
     criticality: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]).optional(),
     operationalStatus: z
       .enum([
-        "OPERATIONAL", "UNDER_MAINTENANCE", "UNDER_REPAIR",
-        "AWAITING_PARTS", "OUT_OF_SERVICE", "RETIRED",
+        "OPERATIONAL",
+        "UNDER_MAINTENANCE",
+        "UNDER_REPAIR",
+        "AWAITING_PARTS",
+        "OUT_OF_SERVICE",
+        "RETIRED",
       ])
       .optional(),
     pm: z.enum(["OVERDUE", "DUE_30", "DUE_NOW", "DUE_SOON", "SCHEDULED"]).optional(),
@@ -170,7 +174,10 @@ equipmentRouter.get("/:id/qr", requireAuth, async (req, res) => {
     width: 512,
     margin: 2,
   });
-  res.type("image/png").set("Content-Disposition", `inline; filename="${device.assetNo}.png"`).send(png);
+  res
+    .type("image/png")
+    .set("Content-Disposition", `inline; filename="${device.assetNo}.png"`)
+    .send(png);
 });
 
 /**
@@ -210,8 +217,12 @@ equipmentRouter.get("/public/:token", scanLimiter, async (req, res) => {
 const statusSchema = z
   .object({
     operationalStatus: z.enum([
-      "OPERATIONAL", "UNDER_MAINTENANCE", "UNDER_REPAIR",
-      "AWAITING_PARTS", "OUT_OF_SERVICE", "RETIRED",
+      "OPERATIONAL",
+      "UNDER_MAINTENANCE",
+      "UNDER_REPAIR",
+      "AWAITING_PARTS",
+      "OUT_OF_SERVICE",
+      "RETIRED",
     ]),
   })
   .strict(); // .strict() blocks mass assignment of role, engineerId, intervals

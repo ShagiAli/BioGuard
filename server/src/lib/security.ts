@@ -41,7 +41,6 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-
 /**
  * A real argon2 hash of a random value, used to keep a login for an
  * unknown account as expensive as one for a real account.

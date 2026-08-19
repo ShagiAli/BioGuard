@@ -72,16 +72,31 @@ export function recalculateDue(input: RecalculateInput): RecalculateResult {
 
   // First ever service, or a device that was never scheduled.
   if (!previousDue) {
-    return { nextDue: addDays(completed, intervalDays), rebased: false, latenessDays: null, graceWindow: window };
+    return {
+      nextDue: addDays(completed, intervalDays),
+      rebased: false,
+      latenessDays: null,
+      graceWindow: window,
+    };
   }
 
   const due = toDay(previousDue);
   const latenessDays = daysBetween(due, completed);
 
   if (scheduleMode === "ANCHORED" || latenessDays <= window) {
-    return { nextDue: addDays(due, intervalDays), rebased: false, latenessDays, graceWindow: window };
+    return {
+      nextDue: addDays(due, intervalDays),
+      rebased: false,
+      latenessDays,
+      graceWindow: window,
+    };
   }
-  return { nextDue: addDays(completed, intervalDays), rebased: true, latenessDays, graceWindow: window };
+  return {
+    nextDue: addDays(completed, intervalDays),
+    rebased: true,
+    latenessDays,
+    graceWindow: window,
+  };
 }
 
 // ------------------------------------------------------------ reminders
