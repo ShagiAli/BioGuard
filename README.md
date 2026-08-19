@@ -24,6 +24,10 @@ Built with TypeScript, Express 5, PostgreSQL, Prisma and React 19.
 
 ![Dashboard](docs/dashboard.png)
 
+*Every figure on the dashboard opens the equipment behind it, filtered by
+the same predicate the count was computed from — so a headline number
+and the list under it cannot disagree.*
+
 ---
 
 ## The interesting problem
@@ -56,6 +60,17 @@ as pure functions taking the reference date as an argument. Nothing in
 it reads the clock or touches the database, which is what lets the same
 code run as a nightly job, as a test, and as a demo control that jumps
 forward in time — with no test-only branches.
+
+![Device detail](docs/device.png)
+
+*A device whose service ran past the grace window. The re-base is
+recorded on the maintenance record and badged in the history, rather
+than the schedule quietly shifting.*
+
+![Equipment filtered to overdue](docs/equipment.png)
+
+*Filters live in the URL, so a drill-down is a plain link, the back
+button behaves, and a filtered view can be sent to a colleague.*
 
 ## Architecture
 
@@ -200,6 +215,11 @@ second run sends nothing, which is the idempotency constraint working.
 Each sweep is four queries per day regardless of fleet size: read the
 candidates, read what has already been sent, one transaction for the
 dispatches and notifications, one batched insert for the mail.
+
+![Delivered reminders](docs/mail.png)
+
+*Messages as delivered. Engineers see mail addressed to them;
+administrators and managers see the whole outbox with recipients.*
 
 ## Deploying
 
