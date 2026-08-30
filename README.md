@@ -145,13 +145,20 @@ cycle.
 ## Testing
 
 ```bash
-npm test              # scheduling rules — pure, no database
-npm run test:integration   # full API against real PostgreSQL
+npm test                   # pure — no database needed
+
+# The integration suite truncates every table, so it insists on a
+# database with "test" in the name and refuses anything else.
+docker exec bioguard-db psql -U bioguard -d bioguard -c "CREATE DATABASE bioguard_test;"
+export DATABASE_URL="postgresql://bioguard:bioguard_dev_only@localhost:5432/bioguard_test?schema=public"
+npm run db:deploy
+npm run test:integration
 ```
 
-**12 unit tests** cover the grace window in both directions, the
-reminder ladder firing on its rungs and staying silent between them, and
-calendar arithmetic across DST boundaries.
+**20 unit tests** cover the grace window in both directions, the
+reminder ladder firing on its rungs and staying silent between them,
+calendar arithmetic across DST boundaries, and the guard that decides
+which database the integration suite may destroy.
 
 **20 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would

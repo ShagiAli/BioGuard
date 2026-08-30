@@ -6,8 +6,8 @@
  * in a list payload, and that recording maintenance moves the schedule
  * the way the rules say it should.
  *
- * Requires a database. Run `npm run test:integration` with Docker up;
- * CI provides one as a service container.
+ * Requires a database, and a dedicated one — see assertTestDatabase
+ * below. CI provides it as a service container.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -15,6 +15,7 @@ import request from "supertest";
 import type { Express } from "express";
 import { prisma } from "../src/lib/prisma.js";
 import { hashPassword } from "../src/lib/security.js";
+import { assertTestDatabase } from "./assert-test-database.js";
 let app: Express;
 
 const PASSWORD = "correct-horse-battery-staple";
@@ -46,6 +47,9 @@ async function login(email: string, password = PASSWORD): Promise<string[]> {
 }
 
 beforeAll(async () => {
+  // Before anything destructive happens.
+  assertTestDatabase(process.env.DATABASE_URL);
+
   process.env.NODE_ENV = "test";
   const { createApp } = await import("../src/app.js");
   app = createApp();
