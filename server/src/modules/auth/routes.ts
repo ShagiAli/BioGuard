@@ -68,7 +68,7 @@ function setSessionCookie(res: import("express").Response, token: string) {
 
 const loginSchema = z
   .object({
-    email: z.string().email().max(255),
+    email: z.email().max(255),
     password: z.string().min(1).max(200),
   })
   .strict();
@@ -162,7 +162,7 @@ authRouter.get("/me", requireAuth, (req, res) => {
 
 // --------------------------------------------------------- password reset
 
-const forgotSchema = z.object({ email: z.string().email().max(255) }).strict();
+const forgotSchema = z.object({ email: z.email().max(255) }).strict();
 
 authRouter.post("/forgot-password", resetLimiter, async (req, res) => {
   const parsed = forgotSchema.safeParse(req.body);

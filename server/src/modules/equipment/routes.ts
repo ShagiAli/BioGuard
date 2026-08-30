@@ -10,7 +10,7 @@ import { addDays, pmState, toDay } from "../../scheduler/rules.js";
 
 export const equipmentRouter = Router();
 
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 
 /** Route params are untrusted. Anything not a UUID is simply not found. */
 function parseId(raw: unknown): string | null {
@@ -26,7 +26,7 @@ function parseId(raw: unknown): string | null {
 const listQuery = z
   .object({
     q: z.string().max(120).optional(),
-    departmentId: z.string().uuid().optional(),
+    departmentId: z.uuid().optional(),
     criticality: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]).optional(),
     operationalStatus: z
       .enum([

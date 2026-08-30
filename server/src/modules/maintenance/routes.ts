@@ -9,7 +9,7 @@ export const maintenanceRouter = Router();
 
 const createSchema = z
   .object({
-    equipmentId: z.string().uuid(),
+    equipmentId: z.uuid(),
     type: z.enum([
       "PREVENTIVE",
       "CORRECTIVE",

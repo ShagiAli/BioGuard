@@ -57,7 +57,7 @@ mailRouter.delete("/read", requireAuth, async (req, res) => {
 });
 
 mailRouter.delete("/:id", requireAuth, async (req, res) => {
-  const parsed = z.string().uuid().safeParse(req.params.id);
+  const parsed = z.uuid().safeParse(req.params.id);
   if (!parsed.success) return res.status(404).json({ error: "Message not found." });
 
   const where = oversees(req.user!) ? {} : { to: req.user!.email };
