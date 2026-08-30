@@ -36,7 +36,7 @@
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "nodemailer": "^9.0.6",
-    "pg-boss": "^10.1.5",
+    "pg-boss": "^10.4.2",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "qrcode": "1.5.4",
