@@ -134,38 +134,3 @@ maintenanceRouter.post("/", requireAuth, requireRole("ADMIN", "ENGINEER"), async
       : null,
   });
 });
-
-maintenanceRouter.get("/", requireAuth, async (req, res) => {
-  const query = z
-    .object({
-      equipmentId: z.string().uuid().optional(),
-      page: z.coerce.number().int().min(1).default(1),
-      pageSize: z.coerce.number().int().min(1).max(100).default(25),
-    })
-    .strict()
-    .safeParse(req.query);
-
-  if (!query.success) return res.status(400).json({ error: "Unrecognised filter." });
-  const { equipmentId, page, pageSize } = query.data;
-
-  const where = {
-    equipment: equipmentScope(req.user!),
-    ...(equipmentId ? { equipmentId } : {}),
-  };
-
-  const [total, rows] = await Promise.all([
-    prisma.maintenanceRecord.count({ where }),
-    prisma.maintenanceRecord.findMany({
-      where,
-      orderBy: { completedOn: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-      include: {
-        engineer: { select: { fullName: true } },
-        equipment: { select: { name: true, assetNo: true } },
-      },
-    }),
-  ]);
-
-  res.json({ total, page, pageSize, rows });
-});

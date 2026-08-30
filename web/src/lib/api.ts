@@ -29,7 +29,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Not every response is JSON. A proxy timeout or an HTML error page
   // would otherwise throw a parse error and surface as "could not reach
   // the server", hiding what actually happened.
-  let data: { error?: string } | null = null;
+  // No initialiser: every path out of the catch throws, so the only way
+  // to reach the code below is through a successful assignment.
+  let data: { error?: string } | null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {

@@ -77,20 +77,12 @@ public demo without sending anything.
 
 The alternative, `log`, discards messages after writing a line. What you
 must not do is point real SMTP at this deployment: every seeded engineer
-has an `@bioguard.local` address that does not exist. Every seeded engineer has an
-`@bioguard.local` address, which does not exist. Pointing a real SMTP
+has an `@bioguard.local` address that does not exist. Pointing a real SMTP
 provider at those and running the scheduler would send dozens of
 messages to invalid recipients — a fast way to get an account
 suspended for bounce rate. In `log` mode reminders are written to the
 log and still appear in the in-app notification centre, so the feature
 demonstrates fine.
-
-Optionally advertise the demo login on the sign-in screen:
-
-```
-DEMO_EMAIL=admin@bioguard.local
-DEMO_PASSWORD=<whatever the seed printed>
-```
 
 ## Steps
 

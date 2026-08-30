@@ -75,7 +75,6 @@ button behaves, and a filtered view can be sent to a colleague.*
 ## Architecture
 
 ```
-docs/prototype.jsx   standalone UI prototype the rules were validated against
 web/                 React 19 · Vite · Tailwind v4 · TanStack Query
   └── /api proxied to the server, so the session cookie is first-party
 
@@ -84,6 +83,7 @@ server/
   src/index.ts       process bootstrap: socket, scheduler, shutdown
   src/middleware/    session loading, role checks, query scoping
   src/modules/       auth · equipment · maintenance · admin
+                     notifications · mail
   src/scheduler/
       rules.ts       pure scheduling logic, no I/O
       job.ts         pg-boss wiring for the nightly sweep
@@ -134,6 +134,9 @@ expiry. Wrong trade for a hospital.
 **QR codes encode an opaque token, not the asset tag.** Asset tags are
 sequential; a QR carrying one would let anyone who photographs a single
 label enumerate the entire estate through the public scan endpoint.
+Scanning a label opens `/e/:token`, an unauthenticated page showing four
+fields — name, asset number, status and location — because the person
+reading it is standing at a bedside with a phone and no session.
 
 **Corrective work does not reset the preventive clock.** Fixing a broken
 sensor is not the scheduled service and must not buy the device another
@@ -150,7 +153,7 @@ npm run test:integration   # full API against real PostgreSQL
 reminder ladder firing on its rungs and staying silent between them, and
 calendar arithmetic across DST boundaries.
 
-**16 integration tests** run against a real database rather than mocks,
+**20 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would
 verify nothing. They assert properties, not just outputs:
 
@@ -254,10 +257,6 @@ upload, MTBF and MTTR analytics, criticality scoring and replacement
 recommendations. The schema and module layout accommodate each without
 rework; they were left out deliberately in favour of building the
 maintenance engine properly.
-
-QR codes are generated and the public scan endpoint works, but the
-frontend has no route for the scan target yet, so scanning a printed
-label does not open the device page.
 
 On MTBF specifically: it needs per-device operating hours, which
 hospitals rarely record. Computing it from calendar time produces a

@@ -21,6 +21,9 @@ export function Badge({ tone = "slate", children }: { tone?: Tone; children: Rea
   );
 }
 
+// Tone mapping belongs beside the Badge it feeds. Same trade-off as in
+// auth.tsx: colocation over fast-refresh granularity.
+// eslint-disable-next-line react-refresh/only-export-components
 export function pmTone(state: string): Tone {
   if (state === "OVERDUE") return "rose";
   if (state === "DUE_NOW") return "amber";

@@ -87,9 +87,13 @@ export function EquipmentDetail() {
                 {d.model}
               </Field>
               <Field label="Operational status">
-                <Badge tone={d.operationalStatus === "OPERATIONAL" ? "emerald" : "amber"}>
-                  {STATUS_LABELS[d.operationalStatus]}
-                </Badge>
+                {canRecord ? (
+                  <StatusControl device={d} />
+                ) : (
+                  <Badge tone={d.operationalStatus === "OPERATIONAL" ? "emerald" : "amber"}>
+                    {STATUS_LABELS[d.operationalStatus]}
+                  </Badge>
+                )}
               </Field>
               <Field label="Department">{d.department.name}</Field>
               <Field label="Location">
@@ -203,6 +207,53 @@ export function EquipmentDetail() {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Status editing, for the roles the API accepts it from.
+ *
+ * Deliberately separate from the maintenance record: taking a device out
+ * of service is not the same event as servicing it, and a device can be
+ * under repair *and* overdue at once. Writing status here never touches
+ * the preventive schedule.
+ *
+ * The options come from STATUS_LABELS so this list cannot drift from the
+ * enum the server validates against.
+ */
+function StatusControl({ device }: { device: Detail }) {
+  const qc = useQueryClient();
+  const [error, setError] = useState("");
+
+  const save = useMutation({
+    mutationFn: (operationalStatus: string) =>
+      api.patch(`/api/equipment/${device.id}/status`, { operationalStatus }),
+    onSuccess: () => {
+      setError("");
+      qc.invalidateQueries({ queryKey: ["equipment"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({ queryKey: ["attention"] });
+    },
+    onError: (err) =>
+      setError(err instanceof ApiError ? err.message : "Could not change the status."),
+  });
+
+  return (
+    <div>
+      <select
+        value={device.operationalStatus}
+        disabled={save.isPending}
+        onChange={(e) => save.mutate(e.target.value)}
+        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 disabled:opacity-50"
+      >
+        {Object.entries(STATUS_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }

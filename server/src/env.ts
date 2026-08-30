@@ -29,9 +29,6 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
-  // Shown on the login screen of a public demo so a reviewer can get in.
-  DEMO_EMAIL: z.string().optional(),
-  DEMO_PASSWORD: z.string().optional(),
   // Number of reverse proxies in front of the app. Wrong values break
   // rate limiting silently: too low and every client shares one bucket
   // behind the proxy's address, too high and clients can spoof their

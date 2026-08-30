@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useMatch } from "react-router-dom";
 import { AuthProvider, Login, useAuth } from "./auth";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
@@ -6,11 +6,23 @@ import { Equipment } from "./pages/Equipment";
 import { EquipmentDetail } from "./pages/EquipmentDetail";
 import { Notifications } from "./pages/Notifications";
 import { Inbox } from "./pages/Inbox";
+import { Scan } from "./pages/Scan";
 import { ForgotPassword, ResetPassword } from "./passwordReset";
 import { Spinner } from "./components/ui";
 
 function Shell() {
   const { user, loading } = useAuth();
+
+  /**
+   * The QR scan target, matched ahead of everything else.
+   *
+   * It is the one route that must render identically signed in or out,
+   * and must not wait on the session probe — a nurse scanning a label at
+   * the bedside should not be shown "Checking your session", still less
+   * a login form.
+   */
+  const scan = useMatch("/e/:token");
+  if (scan?.params.token) return <Scan token={scan.params.token} />;
 
   if (loading) {
     return (

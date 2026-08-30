@@ -102,3 +102,21 @@ export function equipmentScope(user: SessionUser) {
 export function canSeeCosts(user: SessionUser): boolean {
   return user.role === "ADMIN" || user.role === "ENGINEER" || user.role === "MANAGER";
 }
+
+/**
+ * Whether the caller oversees the whole programme rather than their own
+ * workload.
+ *
+ * Reminders and mail are addressed to the engineer responsible for a
+ * device. Administrators and managers hold no equipment of their own, so
+ * scoping them to their own inbox would show them an empty list while
+ * the estate fills with overdue work — they see the whole stream, and
+ * who each item is for.
+ *
+ * Defined here, beside the other scope helpers, because it decides what
+ * a caller may read and delete. Inlining the role comparison at each
+ * call site is how the notification rule and the mail rule drift apart.
+ */
+export function oversees(user: SessionUser): boolean {
+  return user.role === "ADMIN" || user.role === "MANAGER";
+}

@@ -86,6 +86,10 @@ async function main() {
     prisma.auditLog.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.notificationDispatch.deleteMany(),
+    // Mail is addressed by email string, not by foreign key, so it
+    // survives the user rows being deleted. Without this, reminders
+    // from the previous seed reappear in the new engineers' mailboxes.
+    prisma.sentEmail.deleteMany(),
     prisma.maintenanceRecord.deleteMany(),
     prisma.equipment.deleteMany(),
     prisma.session.deleteMany(),

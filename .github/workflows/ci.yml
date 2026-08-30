@@ -64,7 +64,7 @@ jobs:
         run: npm run test:integration
 
   web:
-    name: Web — typecheck and build
+    name: Web — lint, typecheck and build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -78,4 +78,6 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm run lint
+      # `build` runs tsc --noEmit before vite, so this covers typecheck.
       - run: npm run build

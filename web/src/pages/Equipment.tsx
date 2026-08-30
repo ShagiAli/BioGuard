@@ -46,7 +46,19 @@ export function Equipment() {
 
   const page = Number(params.get("page") ?? 1);
 
-  // Debounced, so a query does not fire on every keystroke.
+  /**
+   * Debounced, so a query does not fire on every keystroke.
+   *
+   * `params` must stay in the dependencies. The write lands up to 300ms
+   * after the keystroke that scheduled it, and a filter dropdown may
+   * have rewritten the URL in between — with a stale snapshot the write
+   * restores the old parameters and silently discards the filter the
+   * user just picked. Re-running on `params` also keeps `setParams`
+   * fresh, since react-router memoises it on the current parameters.
+   *
+   * This does not loop: once the term is in the URL the guard below
+   * finds nothing to change.
+   */
   useEffect(() => {
     const timer = setTimeout(() => {
       const next = new URLSearchParams(params);
@@ -56,7 +68,7 @@ export function Equipment() {
       if (next.toString() !== params.toString()) setParams(next, { replace: true });
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, params, setParams]);
 
   const query = useQuery({
     queryKey: ["equipment", params.toString()],
