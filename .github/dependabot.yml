@@ -29,6 +29,12 @@ updates:
       # catching real mistakes.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 breaks typescript-eslint outright — it refuses to
+      # load, so linting stops entirely in both workspaces. The peer
+      # range is >=4.8.4 <6.1.0, so 6.x is the ceiling until
+      # typescript-eslint/typescript-eslint#10940 lands.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /web
@@ -43,6 +49,10 @@ updates:
       web-routine:
         applies-to: version-updates
         update-types: ["minor", "patch"]
+    ignore:
+      # Same TypeScript 7 blocker as the server workspace.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # The runtime image. A base image left alone is where CVEs accumulate
   # quietly, since nothing in the npm tree reports them.
