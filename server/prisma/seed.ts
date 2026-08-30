@@ -11,10 +11,8 @@
  * reviewer following the README should not find them changed.
  */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/prisma.js";
 import { generateToken, hashPassword } from "../src/lib/security.js";
-
-const prisma = new PrismaClient();
 
 const HOSPITAL = "Northfield Teaching Hospital";
 const TODAY = new Date();

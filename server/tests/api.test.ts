@@ -13,10 +13,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/prisma.js";
 import { hashPassword } from "../src/lib/security.js";
-
-const prisma = new PrismaClient();
 let app: Express;
 
 const PASSWORD = "correct-horse-battery-staple";
