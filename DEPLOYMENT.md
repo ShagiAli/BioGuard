@@ -99,6 +99,39 @@ demonstrates fine.
    `node dist/prisma/seed.js`. It prints the passwords — save them.
 6. Open the URL and sign in.
 
+## Upgrading pg-boss
+
+pg-boss is held at 10 deliberately. Version 12 refuses to migrate an
+existing schema — *"Cannot migrate pg-boss schema from version 24: the
+oldest supported starting version is 25"* — and 11 fails from 24 as well.
+Both were tested against a real database.
+
+Version 12 works perfectly against a **fresh** schema, and for this
+application that is a safe route: the `pgboss` schema holds only queue
+machinery — `job`, `queue`, `schedule`, `archive` — all of which
+`startScheduler()` recreates at boot. Reminder idempotency does not live
+there; it lives in `NotificationDispatch`, which is ours and is
+untouched. Nothing durable is lost.
+
+So the upgrade is a schema drop plus a redeploy:
+
+```sql
+DROP SCHEMA pgboss CASCADE;
+```
+
+Do it during the redeploy, not before: whatever is running will recreate
+the schema at its own version the moment it reconnects.
+
+One thing to watch afterwards. A failed scheduler does **not** take the
+API down — that is deliberate, and it means a botched upgrade looks like
+a perfectly healthy site whose reminders have silently stopped. Check
+`/api/health` (`scheduler.healthy`) or the Activity area's scheduler
+banner after deploying, rather than assuming a 200 on the home page means
+the job is running.
+
+Also note the import style changes with the major: pg-boss 10 and 11
+export the class as a default, 12 exports it by name.
+
 ## Before you make it public
 
 **Anyone with the demo admin account can change anything**, including
