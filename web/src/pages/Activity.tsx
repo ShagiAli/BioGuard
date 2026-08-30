@@ -1,0 +1,180 @@
+/**
+ * The estate-wide change feed.
+ *
+ * Every status change and every maintenance record has been written to
+ * the audit table since the first release; this is the first thing that
+ * reads it. Restricted to the oversight roles, matching the split the
+ * API applies.
+ *
+ * The action filter is what makes this a report rather than a log:
+ * filtering to "Schedule re-based" answers the question the scheduling
+ * design cares about — where is the programme slipping — because a
+ * re-base is recorded precisely when work landed outside the grace
+ * window.
+ */
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { History } from "lucide-react";
+import {
+  api,
+  auditChanges,
+  AUDIT_ACTION_LABELS,
+  formatDate,
+  type AuditEntry,
+} from "../lib/api";
+import { Badge, Card, Empty, ErrorNote, Spinner } from "../components/ui";
+
+interface Feed {
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: AuditEntry[];
+}
+
+export function Activity() {
+  const [action, setAction] = useState("");
+  const [page, setPage] = useState(1);
+
+  const actions = useQuery({
+    queryKey: ["audit-actions"],
+    queryFn: () => api.get<{ actions: string[] }>("/api/audit/actions"),
+  });
+
+  const query = useQuery({
+    queryKey: ["audit", action, page],
+    queryFn: () =>
+      api.get<Feed>(
+        `/api/audit?page=${page}${action ? `&action=${encodeURIComponent(action)}` : ""}`
+      ),
+    placeholderData: keepPreviousData,
+  });
+
+  const totalPages = query.data ? Math.ceil(query.data.total / query.data.pageSize) : 1;
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <h1 className="text-xl font-medium text-slate-900">Activity</h1>
+      <p className="mt-1 text-sm text-slate-500">
+        Every recorded change, newest first. {query.data ? `${query.data.total} entries.` : ""}
+      </p>
+
+      <div className="mt-4">
+        <select
+          value={action}
+          onChange={(e) => {
+            setAction(e.target.value);
+            setPage(1);
+          }}
+          className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+        >
+          <option value="">All activity</option>
+          {actions.data?.actions.map((a) => (
+            <option key={a} value={a}>
+              {AUDIT_ACTION_LABELS[a] ?? a}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <Card className="mt-4">
+        {query.isLoading ? (
+          <Spinner label="Loading activity" />
+        ) : query.isError ? (
+          <ErrorNote message="Could not load the activity feed." />
+        ) : query.data!.rows.length === 0 ? (
+          <Empty
+            title="Nothing recorded yet."
+            hint="Changing a device's status or filing maintenance will appear here."
+          />
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {query.data!.rows.map((entry) => (
+              <li key={entry.id} className="px-4 py-3">
+                <AuditRow entry={entry} />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {query.data && totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+                className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage(page + 1)}
+                className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function AuditRow({ entry }: { entry: AuditEntry }) {
+  const rebased = entry.action === "maintenance.recorded_rebased";
+
+  return (
+    <div className="flex items-start gap-3">
+      <History size={15} className="mt-1 shrink-0 text-slate-300" />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={rebased ? "amber" : "slate"}>
+            {AUDIT_ACTION_LABELS[entry.action] ?? entry.action}
+          </Badge>
+          {entry.equipment && (
+            <Link
+              to={`/equipment/${entry.equipment.id}`}
+              className="truncate text-sm text-slate-800 hover:text-teal-800"
+            >
+              {entry.equipment.name}{" "}
+              <span className="font-mono text-xs text-slate-400">{entry.equipment.assetNo}</span>
+            </Link>
+          )}
+        </div>
+
+        <AuditDiff entry={entry} />
+
+        <p className="mt-1 text-xs text-slate-400">
+          {formatDate(entry.createdAt)}
+          {entry.actor ? ` · ${entry.actor.fullName}` : " · system"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** The fields that actually moved, rendered old → new. */
+export function AuditDiff({ entry }: { entry: AuditEntry }) {
+  const changes = auditChanges(entry);
+  if (changes.length === 0) {
+    return <p className="mt-1 text-sm text-slate-500">No field changes recorded.</p>;
+  }
+
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {changes.map((change) => (
+        <li key={change.field} className="text-sm text-slate-600">
+          <span className="text-slate-500">{change.label}:</span>{" "}
+          <span className="text-slate-400">{change.from}</span>
+          <span className="mx-1 text-slate-300">→</span>
+          <span className="font-medium text-slate-800">{change.to}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}

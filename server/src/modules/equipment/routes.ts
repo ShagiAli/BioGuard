@@ -159,6 +159,35 @@ equipmentRouter.get("/:id", requireAuth, async (req, res) => {
   res.json({ ...safe, maintenance, pmState: pmState(device.nextDueAt, toDay(new Date())) });
 });
 
+/**
+ * One device's change history.
+ *
+ * Scoped rather than restricted to oversight roles: the engineer
+ * responsible for a device is exactly the person who needs to see what
+ * was changed on it and by whom. The device is resolved through
+ * equipmentScope first, so an out-of-scope id returns 404 before any
+ * audit row is read — the same disclosure rule as everywhere else here.
+ */
+equipmentRouter.get("/:id/audit", requireAuth, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(404).json({ error: "Equipment not found." });
+
+  const device = await prisma.equipment.findFirst({
+    where: { id, ...equipmentScope(req.user!) },
+    select: { id: true },
+  });
+  if (!device) return res.status(404).json({ error: "Equipment not found." });
+
+  const rows = await prisma.auditLog.findMany({
+    where: { entity: "Equipment", entityId: device.id },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { actor: { select: { fullName: true } } },
+  });
+
+  res.json({ rows });
+});
+
 equipmentRouter.get("/:id/qr", requireAuth, async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(404).json({ error: "Equipment not found." });

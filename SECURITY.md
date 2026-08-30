@@ -115,13 +115,18 @@ professional.
 
 Not implemented: two-factor authentication, virus scanning on uploads
 (uploads themselves are not built yet), append-only enforcement on the
-audit table at the database-grant level, alerting when the nightly sweep
-fails, and backups.
+audit table at the database-grant level, paging or email alerts on sweep
+failure, and backups.
 
-That last one matters most in practice. A maintenance system whose
-reminders silently stop is worse than no system, because people trust
-it. Production deployment needs monitoring on sweep completion before
-anyone relies on it.
+Sweep failure is at least now *detectable*. Each nightly run is recorded,
+and both `/api/health` and an in-app banner report a scheduler that has
+stopped or gone quiet for more than a day — deliberately judged by the
+absence of a recent run, since a crashed process cannot report itself.
+That turns a silent failure into a visible one, which is the part that
+mattered most: a maintenance system whose reminders silently stop is
+worse than no system, because people trust it. Routing that signal to
+somebody's phone is still an operator's job, and backups remain
+unaddressed.
 
 Personal data — staff names, email addresses, session records — falls
 under KVKK/GDPR regardless of the equipment data being fictional. All

@@ -82,6 +82,9 @@ async function main() {
 
   await prisma.$transaction([
     prisma.auditLog.deleteMany(),
+    // Stale sweep rows would make a freshly reset demo report a
+    // healthy cron that has never actually run.
+    prisma.sweepRun.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.notificationDispatch.deleteMany(),
     // Mail is addressed by email string, not by foreign key, so it

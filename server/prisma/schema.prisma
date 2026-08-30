@@ -78,6 +78,11 @@ enum NotifyLevel {
   OVERDUE
 }
 
+enum SweepTrigger {
+  SCHEDULED
+  MANUAL
+}
+
 // ---------------------------------------------------------------- users
 
 model User {
@@ -311,4 +316,30 @@ model AuditLog {
 
   @@index([entity, entityId, createdAt])
   @@index([createdAt])
+}
+
+// ------------------------------------------------------- scheduler runs
+
+/// One completed run of the nightly sweep.
+///
+/// The point of this table is the rows that are *missing*. A process that
+/// has crashed cannot write its own error row, so liveness is judged by
+/// the absence of a recent SCHEDULED run rather than by error reporting.
+/// `error` is a best-effort second signal for the case where the sweep
+/// fails but the process survives.
+///
+/// Only the nightly job writes here. The admin simulation deliberately
+/// does not: it would add a row per simulated day and make a hand-run
+/// look like a healthy cron.
+model SweepRun {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  ranFor     DateTime     @db.Date
+  trigger    SweepTrigger @default(SCHEDULED)
+  scanned    Int
+  sent       Int
+  startedAt  DateTime     @default(now())
+  finishedAt DateTime?
+  error      String?
+
+  @@index([trigger, startedAt])
 }

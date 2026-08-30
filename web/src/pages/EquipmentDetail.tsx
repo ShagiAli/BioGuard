@@ -5,15 +5,18 @@ import { ArrowLeft, CalendarClock, QrCode, Wrench, X } from "lucide-react";
 import {
   api,
   ApiError,
+  AUDIT_ACTION_LABELS,
   daysUntil,
   formatDate,
   formatMoney,
   PM_LABELS,
   STATUS_LABELS,
   titleCase,
+  type AuditEntry,
   type EquipmentDetail as Detail,
 } from "../lib/api";
 import { Badge, Button, Card, ErrorNote, Field, Spinner, pmTone } from "../components/ui";
+import { AuditDiff } from "./Activity";
 import { useAuth } from "../auth";
 
 export function EquipmentDetail() {
@@ -147,6 +150,7 @@ export function EquipmentDetail() {
               </ul>
             )}
           </Card>
+          <ChangeHistory deviceId={d.id} />
         </section>
 
         <aside className="space-y-5">
@@ -455,5 +459,60 @@ function Overlay({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * What has been changed on this device, and by whom.
+ *
+ * Scoped rather than admin-only: the engineer responsible for a device
+ * is exactly the person who needs to see that somebody else took it out
+ * of service. The API resolves the device through the usual equipment
+ * scope first, so an out-of-scope id is a 404 before any audit row is
+ * read.
+ */
+function ChangeHistory({ deviceId }: { deviceId: string }) {
+  const query = useQuery({
+    queryKey: ["equipment-audit", deviceId],
+    queryFn: () => api.get<{ rows: AuditEntry[] }>(`/api/equipment/${deviceId}/audit`),
+  });
+
+  const rows = query.data?.rows ?? [];
+
+  return (
+    <Card>
+      <header className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-sm font-medium text-slate-800">Change history ({rows.length})</h2>
+      </header>
+
+      {query.isLoading ? (
+        <Spinner label="Loading history" />
+      ) : query.isError ? (
+        <div className="p-4">
+          <ErrorNote message="Could not load the change history." />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="p-8 text-sm text-slate-500">
+          No changes recorded yet. Status edits and maintenance appear here.
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {rows.map((entry) => (
+            <li key={entry.id} className="px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={entry.action === "maintenance.recorded_rebased" ? "amber" : "slate"}>
+                  {AUDIT_ACTION_LABELS[entry.action] ?? entry.action}
+                </Badge>
+                <span className="ml-auto text-xs text-slate-400">
+                  {formatDate(entry.createdAt)}
+                  {entry.actor ? ` · ${entry.actor.fullName}` : ""}
+                </span>
+              </div>
+              <AuditDiff entry={entry} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

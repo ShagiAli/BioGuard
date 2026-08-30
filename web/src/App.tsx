@@ -6,6 +6,7 @@ import { Equipment } from "./pages/Equipment";
 import { EquipmentDetail } from "./pages/EquipmentDetail";
 import { Notifications } from "./pages/Notifications";
 import { Inbox } from "./pages/Inbox";
+import { Activity } from "./pages/Activity";
 import { Scan } from "./pages/Scan";
 import { ForgotPassword, ResetPassword } from "./passwordReset";
 import { Spinner } from "./components/ui";
@@ -52,6 +53,8 @@ function Shell() {
         <Route path="/equipment/:id" element={<EquipmentDetail />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/mail" element={<Inbox />} />
+        {/* Role-gated in the API too; this only hides the link. */}
+        <Route path="/activity" element={<Activity />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

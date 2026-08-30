@@ -22,12 +22,14 @@ import { env, isProd } from "./env.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { loadSession } from "./middleware/auth.js";
+import { schedulerState, sweepFreshness } from "./scheduler/status.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { equipmentRouter } from "./modules/equipment/routes.js";
 import { maintenanceRouter } from "./modules/maintenance/routes.js";
 import { adminRouter } from "./modules/admin/routes.js";
 import { notificationsRouter } from "./modules/notifications/routes.js";
 import { mailRouter } from "./modules/mail/routes.js";
+import { auditRouter } from "./modules/audit/routes.js";
 
 export function createApp() {
   const app = express();
@@ -78,9 +80,35 @@ export function createApp() {
 
   app.use(loadSession);
 
+  /**
+   * Liveness for the container and for external monitoring.
+   *
+   * A database failure still fails this check, as it always has. A dead
+   * scheduler deliberately does not: the Dockerfile HEALTHCHECK exits
+   * non-zero on a non-2xx, and index.ts keeps the API serving when the
+   * scheduler dies on purpose — engineers can still record maintenance.
+   * Failing here would turn a degraded but usable system into a restart
+   * loop. The degradation is reported in the body instead.
+   *
+   * The scheduler block is coarse because this route is unauthenticated.
+   * Timestamps and error text live behind /api/admin/scheduler.
+   */
   app.get("/api/health", async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: "ok", time: new Date().toISOString() });
+
+    const { running, startedAt } = schedulerState();
+    const lastSweep = await prisma.sweepRun.findFirst({
+      where: { trigger: "SCHEDULED", error: null },
+      orderBy: { startedAt: "desc" },
+      select: { startedAt: true },
+    });
+    const freshness = sweepFreshness(lastSweep?.startedAt ?? null, startedAt);
+
+    res.json({
+      status: "ok",
+      time: new Date().toISOString(),
+      scheduler: { healthy: running && freshness !== "stale" },
+    });
   });
 
   app.use("/api/auth", authRouter);
@@ -89,6 +117,7 @@ export function createApp() {
   app.use("/api/admin", adminRouter);
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/mail", mailRouter);
+  app.use("/api/audit", auditRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
 

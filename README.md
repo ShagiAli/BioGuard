@@ -83,7 +83,7 @@ server/
   src/index.ts       process bootstrap: socket, scheduler, shutdown
   src/middleware/    session loading, role checks, query scoping
   src/modules/       auth · equipment · maintenance · admin
-                     notifications · mail
+                     notifications · mail · audit
   src/scheduler/
       rules.ts       pure scheduling logic, no I/O
       job.ts         pg-boss wiring for the nightly sweep
@@ -142,6 +142,22 @@ reading it is standing at a bedside with a phone and no session.
 sensor is not the scheduled service and must not buy the device another
 cycle.
 
+**A scheduler that stops is louder than one that fails.** The API stays
+up when the scheduler dies — engineers can still record work — which
+means the dangerous failure is the quiet one: reminders stop and the site
+looks perfectly healthy. Liveness is therefore judged by the *absence* of
+a recent sweep rather than by error reporting, because a process that has
+crashed cannot report its own failure. `/api/health` still returns 200 so
+the container is not restart-looped for a degradation it can serve
+through, and the warning is raised in the body and in the UI instead.
+
+**The audit trail is readable, not just written.** Every status change
+and every maintenance record goes through a per-entity field allowlist
+into `AuditLog`, and both a per-device history and an estate-wide feed
+read it back. Filtering that feed to schedule re-bases is the slippage
+report the grace-window design argues for: a re-base is recorded exactly
+when work landed outside the window.
+
 ## Testing
 
 ```bash
@@ -155,12 +171,12 @@ npm run db:deploy
 npm run test:integration
 ```
 
-**20 unit tests** cover the grace window in both directions, the
+**27 unit tests** cover the grace window in both directions, the
 reminder ladder firing on its rungs and staying silent between them,
 calendar arithmetic across DST boundaries, and the guard that decides
 which database the integration suite may destroy.
 
-**20 integration tests** run against a real database rather than mocks,
+**30 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would
 verify nothing. They assert properties, not just outputs:
 
