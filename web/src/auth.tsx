@@ -16,6 +16,9 @@ const AuthContext = createContext<AuthValue>({
   signOut: async () => {},
 });
 
+// The hook lives with the provider that owns the context; splitting them
+// to satisfy fast refresh would scatter one concern across two files.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {

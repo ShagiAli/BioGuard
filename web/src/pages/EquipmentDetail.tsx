@@ -5,15 +5,20 @@ import { ArrowLeft, CalendarClock, QrCode, Wrench, X } from "lucide-react";
 import {
   api,
   ApiError,
+  AUDIT_ACTION_LABELS,
+  canSeeCosts,
+  MAINTENANCE_TYPES,
   daysUntil,
   formatDate,
   formatMoney,
   PM_LABELS,
   STATUS_LABELS,
   titleCase,
+  type AuditEntry,
   type EquipmentDetail as Detail,
 } from "../lib/api";
 import { Badge, Button, Card, ErrorNote, Field, Spinner, pmTone } from "../components/ui";
+import { AuditDiff } from "./Activity";
 import { useAuth } from "../auth";
 
 export function EquipmentDetail() {
@@ -24,7 +29,7 @@ export function EquipmentDetail() {
   const [toast, setToast] = useState<string | null>(null);
 
   const canRecord = user?.role === "ADMIN" || user?.role === "ENGINEER";
-  const canSeeCost = user?.role !== "STAFF";
+  const canSeeCost = canSeeCosts(user?.role);
 
   const query = useQuery({
     queryKey: ["equipment", id],
@@ -36,7 +41,8 @@ export function EquipmentDetail() {
 
   const d = query.data!;
   const remaining = daysUntil(d.nextDueAt);
-  const grace = d.graceDaysOverride ?? Math.round(d.intervalDays * 0.2);
+  // Served by the API from the same function the scheduler uses.
+  const grace = d.graceWindow;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -87,9 +93,13 @@ export function EquipmentDetail() {
                 {d.model}
               </Field>
               <Field label="Operational status">
-                <Badge tone={d.operationalStatus === "OPERATIONAL" ? "emerald" : "amber"}>
-                  {STATUS_LABELS[d.operationalStatus]}
-                </Badge>
+                {canRecord ? (
+                  <StatusControl device={d} />
+                ) : (
+                  <Badge tone={d.operationalStatus === "OPERATIONAL" ? "emerald" : "amber"}>
+                    {STATUS_LABELS[d.operationalStatus]}
+                  </Badge>
+                )}
               </Field>
               <Field label="Department">{d.department.name}</Field>
               <Field label="Location">
@@ -143,6 +153,7 @@ export function EquipmentDetail() {
               </ul>
             )}
           </Card>
+          <ChangeHistory deviceId={d.id} />
         </section>
 
         <aside className="space-y-5">
@@ -203,6 +214,53 @@ export function EquipmentDetail() {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Status editing, for the roles the API accepts it from.
+ *
+ * Deliberately separate from the maintenance record: taking a device out
+ * of service is not the same event as servicing it, and a device can be
+ * under repair *and* overdue at once. Writing status here never touches
+ * the preventive schedule.
+ *
+ * The options come from STATUS_LABELS so this list cannot drift from the
+ * enum the server validates against.
+ */
+function StatusControl({ device }: { device: Detail }) {
+  const qc = useQueryClient();
+  const [error, setError] = useState("");
+
+  const save = useMutation({
+    mutationFn: (operationalStatus: string) =>
+      api.patch(`/api/equipment/${device.id}/status`, { operationalStatus }),
+    onSuccess: () => {
+      setError("");
+      qc.invalidateQueries({ queryKey: ["equipment"] });
+      qc.invalidateQueries({ queryKey: ["summary"] });
+      qc.invalidateQueries({ queryKey: ["attention"] });
+    },
+    onError: (err) =>
+      setError(err instanceof ApiError ? err.message : "Could not change the status."),
+  });
+
+  return (
+    <div>
+      <select
+        value={device.operationalStatus}
+        disabled={save.isPending}
+        onChange={(e) => save.mutate(e.target.value)}
+        className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 disabled:opacity-50"
+      >
+        {Object.entries(STATUS_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
@@ -303,7 +361,7 @@ function RecordDialog({
               onChange={(e) => setForm({ ...form, type: e.target.value })}
               className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm"
             >
-              {["PREVENTIVE", "CORRECTIVE", "INSPECTION", "SAFETY_TEST", "CALIBRATION"].map((t) => (
+              {MAINTENANCE_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {titleCase(t)}
                 </option>
@@ -404,5 +462,60 @@ function Overlay({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * What has been changed on this device, and by whom.
+ *
+ * Scoped rather than admin-only: the engineer responsible for a device
+ * is exactly the person who needs to see that somebody else took it out
+ * of service. The API resolves the device through the usual equipment
+ * scope first, so an out-of-scope id is a 404 before any audit row is
+ * read.
+ */
+function ChangeHistory({ deviceId }: { deviceId: string }) {
+  const query = useQuery({
+    queryKey: ["equipment-audit", deviceId],
+    queryFn: () => api.get<{ rows: AuditEntry[] }>(`/api/equipment/${deviceId}/audit`),
+  });
+
+  const rows = query.data?.rows ?? [];
+
+  return (
+    <Card>
+      <header className="border-b border-slate-200 px-4 py-3">
+        <h2 className="text-sm font-medium text-slate-800">Change history ({rows.length})</h2>
+      </header>
+
+      {query.isLoading ? (
+        <Spinner label="Loading history" />
+      ) : query.isError ? (
+        <div className="p-4">
+          <ErrorNote message="Could not load the change history." />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="p-8 text-sm text-slate-500">
+          No changes recorded yet. Status edits and maintenance appear here.
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {rows.map((entry) => (
+            <li key={entry.id} className="px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={entry.action === "maintenance.recorded_rebased" ? "amber" : "slate"}>
+                  {AUDIT_ACTION_LABELS[entry.action] ?? entry.action}
+                </Badge>
+                <span className="ml-auto text-xs text-slate-400">
+                  {formatDate(entry.createdAt)}
+                  {entry.actor ? ` · ${entry.actor.fullName}` : ""}
+                </span>
+              </div>
+              <AuditDiff entry={entry} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

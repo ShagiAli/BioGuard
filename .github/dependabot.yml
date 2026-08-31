@@ -1,0 +1,73 @@
+# Dependency updates.
+#
+# Everything in this repository drifted a long way before this file
+# existed — several majors behind across both workspaces — because
+# nothing was watching. Weekly, grouped, and deliberately quiet:
+# routine minor and patch bumps arrive as one pull request per
+# workspace, while majors come individually because each needs a
+# migration pass and reviewing them batched is how they get rubber
+# stamped.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Istanbul
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "server"]
+    groups:
+      server-routine:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
+    ignore:
+      # @types/node must track the Node major the app actually runs on
+      # (engines >=22, and the image is node:22-alpine). A newer line
+      # types APIs the runtime does not have, so the compiler stops
+      # catching real mistakes.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 breaks typescript-eslint outright — it refuses to
+      # load, so linting stops entirely in both workspaces. The peer
+      # range is >=4.8.4 <6.1.0, so 6.x is the ceiling until
+      # typescript-eslint/typescript-eslint#10940 lands.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Istanbul
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "web"]
+    groups:
+      web-routine:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
+    ignore:
+      # Same TypeScript 7 blocker as the server workspace.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+  # The runtime image. A base image left alone is where CVEs accumulate
+  # quietly, since nothing in the npm tree reports them.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Istanbul
+    labels: ["dependencies", "docker"]
+
+  # ci.yml pins actions by major tag; this keeps those current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      timezone: Europe/Istanbul
+    labels: ["dependencies", "ci"]

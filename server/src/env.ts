@@ -14,7 +14,7 @@ import { z } from "zod";
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
-  APP_URL: z.string().url(),
+  APP_URL: z.url(),
   TIMEZONE: z.string().default("Europe/Istanbul"),
   DATABASE_URL: z.string().min(1),
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
@@ -29,9 +29,6 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
-  // Shown on the login screen of a public demo so a reviewer can get in.
-  DEMO_EMAIL: z.string().optional(),
-  DEMO_PASSWORD: z.string().optional(),
   // Number of reverse proxies in front of the app. Wrong values break
   // rate limiting silently: too low and every client shares one bucket
   // behind the proxy's address, too high and clients can spoof their

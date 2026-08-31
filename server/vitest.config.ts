@@ -9,7 +9,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include:
-      process.env.TEST_SCOPE === "integration" ? ["tests/api.test.ts"] : ["tests/rules.test.ts"],
+      process.env.TEST_SCOPE === "integration"
+        ? ["tests/api.test.ts"]
+        : ["tests/rules.test.ts", "tests/guard.test.ts", "tests/scheduler-status.test.ts"],
     testTimeout: 30_000,
     hookTimeout: 60_000,
     // Integration tests share one database; running them in parallel

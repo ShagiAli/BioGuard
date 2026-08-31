@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
 import { api, formatDate, type Notification } from "../lib/api";
-import { Badge, Card, ErrorNote, Spinner, type Tone } from "../components/ui";
+import { Badge, Card, ErrorNote, Pager, Spinner, type Tone } from "../components/ui";
 
 const LEVEL_TONE: Record<string, Tone> = {
   INFO: "sky",
@@ -15,12 +16,19 @@ const LEVEL_TONE: Record<string, Tone> = {
 export function Notifications() {
   const qc = useQueryClient();
 
+  const [page, setPage] = useState(1);
+
   const query = useQuery({
-    queryKey: ["notifications"],
+    queryKey: ["notifications", page],
     queryFn: () =>
-      api.get<{ rows: Notification[]; unread: number; scope: "all" | "own" }>(
-        "/api/notifications"
-      ),
+      api.get<{
+        total: number;
+        pageSize: number;
+        rows: Notification[];
+        unread: number;
+        scope: "all" | "own";
+      }>(`/api/notifications?page=${page}`),
+    placeholderData: keepPreviousData,
   });
 
   const markAll = useMutation({
@@ -32,6 +40,7 @@ export function Notifications() {
   if (query.isError) return <ErrorNote message="Could not load notifications." />;
 
   const rows = query.data!.rows;
+  const totalPages = Math.ceil(query.data!.total / query.data!.pageSize);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -94,6 +103,12 @@ export function Notifications() {
             </li>
           ))}
         </ul>
+      )}
+
+      {totalPages > 1 && (
+        <Card className="mt-2">
+          <Pager page={page} totalPages={totalPages} onChange={setPage} />
+        </Card>
       )}
     </div>
   );

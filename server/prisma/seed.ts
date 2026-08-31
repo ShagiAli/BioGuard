@@ -11,10 +11,8 @@
  * reviewer following the README should not find them changed.
  */
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/prisma.js";
 import { generateToken, hashPassword } from "../src/lib/security.js";
-
-const prisma = new PrismaClient();
 
 const HOSPITAL = "Northfield Teaching Hospital";
 const TODAY = new Date();
@@ -84,8 +82,15 @@ async function main() {
 
   await prisma.$transaction([
     prisma.auditLog.deleteMany(),
+    // Stale sweep rows would make a freshly reset demo report a
+    // healthy cron that has never actually run.
+    prisma.sweepRun.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.notificationDispatch.deleteMany(),
+    // Mail is addressed by email string, not by foreign key, so it
+    // survives the user rows being deleted. Without this, reminders
+    // from the previous seed reappear in the new engineers' mailboxes.
+    prisma.sentEmail.deleteMany(),
     prisma.maintenanceRecord.deleteMany(),
     prisma.equipment.deleteMany(),
     prisma.session.deleteMany(),

@@ -9,7 +9,6 @@
 
 import express from "express";
 import helmet from "helmet";
-import cors from "cors";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
@@ -18,15 +17,18 @@ import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 
-import { z } from "zod";
 import { env, isProd } from "./env.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
-import { loadSession, requireAuth } from "./middleware/auth.js";
+import { loadSession } from "./middleware/auth.js";
+import { schedulerState, sweepFreshness } from "./scheduler/status.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { equipmentRouter } from "./modules/equipment/routes.js";
 import { maintenanceRouter } from "./modules/maintenance/routes.js";
 import { adminRouter } from "./modules/admin/routes.js";
+import { notificationsRouter } from "./modules/notifications/routes.js";
+import { mailRouter } from "./modules/mail/routes.js";
+import { auditRouter } from "./modules/audit/routes.js";
 
 export function createApp() {
   const app = express();
@@ -50,7 +52,11 @@ export function createApp() {
     })
   );
 
-  app.use(cors({ origin: env.APP_URL, credentials: true }));
+  // No CORS middleware: every supported deployment is single-origin.
+  // The session cookie is SameSite=Strict, so a frontend on another
+  // domain could not hold a session anyway. Sending no
+  // Access-Control-Allow-Origin at all is stricter than an allowlist —
+  // the browser refuses every cross-origin read by default.
   app.use(express.json({ limit: "100kb" }));
   app.use(cookieParser());
 
@@ -77,123 +83,44 @@ export function createApp() {
 
   app.use(loadSession);
 
+  /**
+   * Liveness for the container and for external monitoring.
+   *
+   * A database failure still fails this check, as it always has. A dead
+   * scheduler deliberately does not: the Dockerfile HEALTHCHECK exits
+   * non-zero on a non-2xx, and index.ts keeps the API serving when the
+   * scheduler dies on purpose — engineers can still record maintenance.
+   * Failing here would turn a degraded but usable system into a restart
+   * loop. The degradation is reported in the body instead.
+   *
+   * The scheduler block is coarse because this route is unauthenticated.
+   * Timestamps and error text live behind /api/admin/scheduler.
+   */
   app.get("/api/health", async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: "ok", time: new Date().toISOString() });
+
+    const { running, startedAt } = schedulerState();
+    const lastSweep = await prisma.sweepRun.findFirst({
+      where: { trigger: "SCHEDULED", error: null },
+      orderBy: { startedAt: "desc" },
+      select: { startedAt: true },
+    });
+    const freshness = sweepFreshness(lastSweep?.startedAt ?? null, startedAt);
+
+    res.json({
+      status: "ok",
+      time: new Date().toISOString(),
+      scheduler: { healthy: running && freshness !== "stale" },
+    });
   });
 
   app.use("/api/auth", authRouter);
   app.use("/api/equipment", equipmentRouter);
   app.use("/api/maintenance", maintenanceRouter);
   app.use("/api/admin", adminRouter);
-
-  app.get("/api/notifications", requireAuth, async (req, res) => {
-    // Reminders are addressed to the engineer responsible for the
-    // device. Administrators and managers hold no equipment of their
-    // own, so scoping them to their own inbox would show them an empty
-    // list while the estate fills with overdue work. They oversee the
-    // programme, so they see the whole stream and who each item is for.
-    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
-
-    const rows = await prisma.notification.findMany({
-      where: oversees ? {} : { recipientId: req.user!.id },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      include: {
-        equipment: { select: { id: true, name: true, assetNo: true } },
-        recipient: { select: { id: true, fullName: true } },
-      },
-    });
-
-    res.json({
-      rows,
-      unread: rows.filter((r) => !r.readAt).length,
-      scope: oversees ? "all" : "own",
-    });
-  });
-
-  app.post("/api/notifications/read-all", requireAuth, async (req, res) => {
-    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
-    await prisma.notification.updateMany({
-      where: oversees ? { readAt: null } : { recipientId: req.user!.id, readAt: null },
-      data: { readAt: new Date() },
-    });
-    res.status(204).end();
-  });
-
-  /**
-   * Delivered mail for the signed-in user.
-   *
-   * Reminders are addressed to the engineer responsible for a device.
-   * Oversight roles see the whole outbox, the same way they see the
-   * whole notification stream — otherwise the administrator who runs
-   * the sweep can never see what it produced.
-   */
-  app.get("/api/mail", requireAuth, async (req, res) => {
-    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
-
-    const rows = await prisma.sentEmail.findMany({
-      where: oversees ? {} : { to: req.user!.email },
-      orderBy: { sentAt: "desc" },
-      take: 100,
-    });
-
-    res.json({
-      rows,
-      unread: rows.filter((r) => !r.readAt).length,
-      scope: oversees ? "all" : "own",
-    });
-  });
-
-  app.post("/api/mail/read-all", requireAuth, async (req, res) => {
-    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
-    await prisma.sentEmail.updateMany({
-      where: oversees ? { readAt: null } : { to: req.user!.email, readAt: null },
-      data: { readAt: new Date() },
-    });
-    res.status(204).end();
-  });
-
-  /**
-   * Clear read messages. Declared before the :id route so "read" is
-   * never mistaken for an identifier.
-   *
-   * Only read messages go, and only within the caller's scope — an
-   * unread reminder is the one thing a mailbox must not lose.
-   */
-  app.delete("/api/mail/read", requireAuth, async (req, res) => {
-    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
-    const { count } = await prisma.sentEmail.deleteMany({
-      where: oversees ? { readAt: { not: null } } : { to: req.user!.email, readAt: { not: null } },
-    });
-    res.json({ deleted: count });
-  });
-
-  app.delete("/api/mail/:id", requireAuth, async (req, res) => {
-    const parsed = z.string().uuid().safeParse(req.params.id);
-    if (!parsed.success) return res.status(404).json({ error: "Message not found." });
-
-    const oversees = req.user!.role === "ADMIN" || req.user!.role === "MANAGER";
-
-    // deleteMany rather than delete: the scope goes in the where clause,
-    // so a message belonging to someone else matches nothing instead of
-    // being deleted by id alone.
-    const { count } = await prisma.sentEmail.deleteMany({
-      where: oversees ? { id: parsed.data } : { id: parsed.data, to: req.user!.email },
-    });
-
-    if (count === 0) return res.status(404).json({ error: "Message not found." });
-    res.status(204).end();
-  });
-
-  // Public demo credentials, if this deployment advertises them.
-  app.get("/api/demo-credentials", (_req, res) => {
-    res.json(
-      env.DEMO_EMAIL && env.DEMO_PASSWORD
-        ? { email: env.DEMO_EMAIL, password: env.DEMO_PASSWORD }
-        : {}
-    );
-  });
+  app.use("/api/notifications", notificationsRouter);
+  app.use("/api/mail", mailRouter);
+  app.use("/api/audit", auditRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
 

@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { runSweepRange } from "../../scheduler/job.js";
 import { addDays, toDay } from "../../scheduler/rules.js";
+import { SWEEP_STALE_AFTER_HOURS, schedulerState, sweepFreshness } from "../../scheduler/status.js";
 
 export const adminRouter = Router();
 
@@ -45,4 +46,45 @@ adminRouter.post("/reset-dispatches", requireAuth, requireRole("ADMIN"), async (
   const { count } = await prisma.notificationDispatch.deleteMany({});
   await prisma.notification.deleteMany({});
   res.json({ cleared: count });
+});
+
+/**
+ * Whether the reminder engine is actually running.
+ *
+ * The failure this answers for is specific: the scheduler dies, the API
+ * carries on serving, and reminders stop without anyone noticing.
+ * `/api/health` reports only a boolean because it is unauthenticated —
+ * the timestamps and the failure reason are here, behind a role.
+ *
+ * Managers see it as well as administrators. They own the maintenance
+ * programme, so they are the people who need to know the reminders have
+ * stopped, even though they cannot restart anything themselves.
+ */
+adminRouter.get("/scheduler", requireAuth, requireRole("ADMIN", "MANAGER"), async (_req, res) => {
+  const { running, startedAt, lastError } = schedulerState();
+
+  const [lastSweep, recent] = await Promise.all([
+    prisma.sweepRun.findFirst({
+      where: { trigger: "SCHEDULED", error: null },
+      orderBy: { startedAt: "desc" },
+    }),
+    prisma.sweepRun.findMany({
+      where: { trigger: "SCHEDULED" },
+      orderBy: { startedAt: "desc" },
+      take: 14,
+    }),
+  ]);
+
+  const freshness = sweepFreshness(lastSweep?.startedAt ?? null, startedAt);
+
+  res.json({
+    running,
+    startedAt,
+    lastError,
+    freshness,
+    staleAfterHours: SWEEP_STALE_AFTER_HOURS,
+    lastSweepAt: lastSweep?.startedAt ?? null,
+    lastSweepFor: lastSweep?.ranFor ?? null,
+    recent,
+  });
 });

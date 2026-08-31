@@ -1,31 +1,51 @@
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Boxes, Clock, LayoutDashboard, LogOut, Mail, RotateCcw } from "lucide-react";
-import { api, titleCase, type Notification } from "../lib/api";
+import {
+  AlertTriangle,
+  Bell,
+  Boxes,
+  Clock,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Mail,
+  RotateCcw,
+} from "lucide-react";
+import { api, formatDate, titleCase, type SchedulerHealth } from "../lib/api";
 import { useAuth } from "../auth";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
+  // Only the unread counts are needed here, and those are counted over
+  // the whole mailbox rather than the page — so ask for the smallest
+  // page the API allows instead of pulling rows the sidebar never draws.
   const { data } = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => api.get<{ rows: Notification[]; unread: number }>("/api/notifications"),
+    queryKey: ["notifications", "badge"],
+    queryFn: () => api.get<{ unread: number }>("/api/notifications?pageSize=1"),
     refetchInterval: 60_000,
   });
 
   const mail = useQuery({
-    queryKey: ["mail"],
-    queryFn: () => api.get<{ rows: unknown[]; unread: number }>("/api/mail"),
+    queryKey: ["mail", "badge"],
+    queryFn: () => api.get<{ unread: number }>("/api/mail?pageSize=1"),
     refetchInterval: 60_000,
   });
+
+  // Same split the API applies: oversight roles see the whole programme
+  // rather than their own workload.
+  const oversees = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const nav = [
     { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
     { to: "/equipment", label: "Equipment", icon: Boxes, end: false },
     { to: "/notifications", label: "Notifications", icon: Bell, end: false, count: data?.unread },
     { to: "/mail", label: "Mail", icon: Mail, end: false, count: mail.data?.unread },
+    ...(oversees
+      ? [{ to: "/activity", label: "Activity", icon: History, end: false, count: undefined }]
+      : []),
   ];
 
   return (
@@ -84,6 +104,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {oversees && <SchedulerWarning />}
         {user?.role === "ADMIN" && <SimulateBar />}
         <main className="flex-1 overflow-auto p-5">{children}</main>
       </div>
@@ -199,5 +220,57 @@ function SimulateBar() {
         </div>
       )}
     </header>
+  );
+}
+
+/**
+ * Warns when the reminder engine has gone quiet.
+ *
+ * The failure this exists for is specific and silent: the scheduler
+ * dies, the API keeps serving, engineers keep filing work, and reminders
+ * simply stop. Nothing else in the product would show it — the worst
+ * outcome for a system people have started trusting.
+ *
+ * Renders nothing while healthy. A banner that is always there is one
+ * nobody reads.
+ */
+function SchedulerWarning() {
+  const { data } = useQuery({
+    queryKey: ["scheduler"],
+    queryFn: () => api.get<SchedulerHealth>("/api/admin/scheduler"),
+    refetchInterval: 60_000,
+  });
+
+  if (!data) return null;
+  const broken = !data.running;
+  const stale = data.freshness === "stale";
+  if (!broken && !stale) return null;
+
+  return (
+    <div className="border-b border-rose-200 bg-rose-50 px-5 py-3">
+      <div className="flex items-start gap-3">
+        <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-600" />
+        <div className="min-w-0 flex-1 text-sm text-rose-900">
+          <span className="font-medium">
+            {broken
+              ? "The reminder engine is not running."
+              : `No maintenance sweep has run in over ${data.staleAfterHours} hours.`}
+          </span>{" "}
+          {broken
+            ? "Maintenance can still be recorded, but no reminders are being sent."
+            : "The nightly sweep runs at 02:00, so reminders may already be overdue."}
+          {data.lastSweepAt && (
+            <span className="mt-0.5 block text-xs text-rose-800">
+              Last successful sweep: {formatDate(data.lastSweepAt)}.
+            </span>
+          )}
+          {data.lastError && (
+            <span className="mt-1 block break-words font-mono text-xs text-rose-800">
+              {data.lastError}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

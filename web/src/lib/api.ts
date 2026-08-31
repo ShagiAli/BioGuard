@@ -29,7 +29,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Not every response is JSON. A proxy timeout or an HTML error page
   // would otherwise throw a parse error and surface as "could not reach
   // the server", hiding what actually happened.
-  let data: { error?: string } | null = null;
+  // No initialiser: every path out of the catch throws, so the only way
+  // to reach the code below is through a successful assignment.
+  let data: { error?: string } | null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
@@ -112,6 +114,8 @@ export interface MaintenanceRecord {
 export interface EquipmentDetail extends EquipmentRow {
   intervalSource: string;
   graceDaysOverride: number | null;
+  /** Computed server-side from the scheduling rules, never re-derived here. */
+  graceWindow: number;
   warrantyEndsAt: string | null;
   purchasePrice: string | null;
   category: { name: string };
@@ -177,6 +181,139 @@ export const STATUS_LABELS: Record<OperationalStatus, string> = {
   RETIRED: "Retired",
 };
 
+/**
+ * The maintenance types the API accepts, in the order the schema
+ * declares them. Kept as one list so a form cannot quietly offer a
+ * subset — EMERGENCY was missing from the record dialog for exactly
+ * that reason.
+ */
+export const MAINTENANCE_TYPES = [
+  "PREVENTIVE",
+  "CORRECTIVE",
+  "EMERGENCY",
+  "CALIBRATION",
+  "INSPECTION",
+  "SAFETY_TEST",
+] as const;
+
+/**
+ * Mirrors canSeeCosts() in the server's auth middleware.
+ *
+ * Written as the same explicit allowlist rather than `role !==
+ * "STAFF"`. The two are equivalent for today's four roles and would
+ * diverge the moment a fifth is added, with the UI showing a field the
+ * API strips.
+ */
+export function canSeeCosts(role: Role | undefined): boolean {
+  return role === "ADMIN" || role === "ENGINEER" || role === "MANAGER";
+}
+
 export function titleCase(value: string): string {
   return value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, " ");
+}
+
+// ------------------------------------------------------ audit + health
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  createdAt: string;
+  actor: { fullName: string } | null;
+  equipment?: { id: string; name: string; assetNo: string } | null;
+}
+
+export interface SweepRun {
+  id: string;
+  ranFor: string;
+  scanned: number;
+  sent: number;
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
+}
+
+export interface SchedulerHealth {
+  running: boolean;
+  startedAt: string | null;
+  lastError: string | null;
+  freshness: "fresh" | "stale" | "unknown";
+  staleAfterHours: number;
+  lastSweepAt: string | null;
+  lastSweepFor: string | null;
+  recent: SweepRun[];
+}
+
+export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "equipment.status_changed": "Status changed",
+  "maintenance.recorded": "Maintenance recorded",
+  "maintenance.recorded_rebased": "Schedule re-based",
+};
+
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  operationalStatus: "Status",
+  criticality: "Criticality",
+  nextDueAt: "Next due",
+  lastCompletedAt: "Last completed",
+  intervalDays: "Interval",
+  scheduleMode: "Schedule rule",
+  engineerId: "Responsible engineer",
+  departmentId: "Department",
+  roomId: "Room",
+  assetNo: "Asset number",
+  completedOn: "Completed on",
+  downtimeHours: "Downtime",
+  rebased: "Schedule re-based",
+  nextDueAfter: "Next due after",
+};
+
+/** camelCase to something readable, for any field without an explicit label. */
+const humanise = (key: string) =>
+  key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (c) => c.toUpperCase())
+    .trim();
+
+function auditValue(field: string, value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (field === "operationalStatus") {
+    return STATUS_LABELS[value as OperationalStatus] ?? String(value);
+  }
+  if (/(At|On|After)$/.test(field)) return formatDate(String(value));
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  // Enum members arrive as SCREAMING_SNAKE_CASE.
+  if (typeof value === "string" && /^[A-Z][A-Z_]*$/.test(value)) return titleCase(value);
+  return String(value);
+}
+
+export interface AuditChange {
+  field: string;
+  label: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * The fields that actually differ between before and after.
+ *
+ * The audit writer stores a fixed allowlist per entity, so both sides
+ * carry the same keys whether or not they changed. Showing all of them
+ * would bury the one that moved.
+ */
+export function auditChanges(entry: AuditEntry): AuditChange[] {
+  const before = entry.before ?? {};
+  const after = entry.after ?? {};
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+
+  return keys
+    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .map((key) => ({
+      field: key,
+      label: AUDIT_FIELD_LABELS[key] ?? humanise(key),
+      from: auditValue(key, before[key]),
+      to: auditValue(key, after[key]),
+    }));
 }

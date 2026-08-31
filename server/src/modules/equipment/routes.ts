@@ -6,11 +6,11 @@ import { prisma } from "../../lib/prisma.js";
 import { env } from "../../env.js";
 import { recordAudit } from "../../lib/audit.js";
 import { canSeeCosts, equipmentScope, requireAuth, requireRole } from "../../middleware/auth.js";
-import { addDays, pmState, toDay } from "../../scheduler/rules.js";
+import { addDays, graceDays, pmState, toDay } from "../../scheduler/rules.js";
 
 export const equipmentRouter = Router();
 
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 
 /** Route params are untrusted. Anything not a UUID is simply not found. */
 function parseId(raw: unknown): string | null {
@@ -26,7 +26,7 @@ function parseId(raw: unknown): string | null {
 const listQuery = z
   .object({
     q: z.string().max(120).optional(),
-    departmentId: z.string().uuid().optional(),
+    departmentId: z.uuid().optional(),
     criticality: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]).optional(),
     operationalStatus: z
       .enum([
@@ -156,7 +156,44 @@ equipmentRouter.get("/:id", requireAuth, async (req, res) => {
     ? device.maintenance
     : device.maintenance.map(({ cost, ...rest }) => rest);
 
-  res.json({ ...safe, maintenance, pmState: pmState(device.nextDueAt, toDay(new Date())) });
+  res.json({
+    ...safe,
+    maintenance,
+    pmState: pmState(device.nextDueAt, toDay(new Date())),
+    // Computed here from the same function the scheduler uses, so the
+    // UI cannot drift from the rule by holding its own copy of the
+    // ratio — which it previously did.
+    graceWindow: graceDays(device.intervalDays, device.graceDaysOverride),
+  });
+});
+
+/**
+ * One device's change history.
+ *
+ * Scoped rather than restricted to oversight roles: the engineer
+ * responsible for a device is exactly the person who needs to see what
+ * was changed on it and by whom. The device is resolved through
+ * equipmentScope first, so an out-of-scope id returns 404 before any
+ * audit row is read — the same disclosure rule as everywhere else here.
+ */
+equipmentRouter.get("/:id/audit", requireAuth, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(404).json({ error: "Equipment not found." });
+
+  const device = await prisma.equipment.findFirst({
+    where: { id, ...equipmentScope(req.user!) },
+    select: { id: true },
+  });
+  if (!device) return res.status(404).json({ error: "Equipment not found." });
+
+  const rows = await prisma.auditLog.findMany({
+    where: { entity: "Equipment", entityId: device.id },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { actor: { select: { fullName: true } } },
+  });
+
+  res.json({ rows });
 });
 
 equipmentRouter.get("/:id/qr", requireAuth, async (req, res) => {
@@ -185,7 +222,12 @@ equipmentRouter.get("/:id/qr", requireAuth, async (req, res) => {
  * the bedside, which means it returns the bare minimum and nothing
  * that would be useful to someone who found a discarded label.
  */
-const scanLimiter = rateLimit({ windowMs: 60_000, limit: 30 });
+const scanLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 equipmentRouter.get("/public/:token", scanLimiter, async (req, res) => {
   const token = z.string().min(20).max(64).safeParse(req.params.token);

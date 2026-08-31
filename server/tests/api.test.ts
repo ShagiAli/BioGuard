@@ -6,17 +6,16 @@
  * in a list payload, and that recording maintenance moves the schedule
  * the way the rules say it should.
  *
- * Requires a database. Run `npm run test:integration` with Docker up;
- * CI provides one as a service container.
+ * Requires a database, and a dedicated one — see assertTestDatabase
+ * below. CI provides it as a service container.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/prisma.js";
 import { hashPassword } from "../src/lib/security.js";
-
-const prisma = new PrismaClient();
+import { assertTestDatabase } from "./assert-test-database.js";
 let app: Express;
 
 const PASSWORD = "correct-horse-battery-staple";
@@ -39,21 +38,37 @@ let seeded: Seeded;
  * here means every caller gets a defined value and a missing cookie
  * fails loudly at the point it happens.
  */
+const sessions = new Map<string, string[]>();
+
 async function login(email: string, password = PASSWORD): Promise<string[]> {
+  // Cached per user. The account limiter allows ten attempts per quarter
+  // hour keyed on the submitted address, and that ceiling is a real
+  // defence worth keeping at its production value in tests — so the
+  // suite reuses sessions instead of raising it. Argon2 verification is
+  // deliberately slow, so this is also the faster path.
+  const cached = sessions.get(email);
+  if (cached) return cached;
+
   const res = await request(app).post("/api/auth/login").send({ email, password }).expect(200);
 
   const raw = res.headers["set-cookie"] as string[] | string | undefined;
   expect(raw, "login returned no session cookie").toBeDefined();
-  return Array.isArray(raw) ? raw : [raw as string];
+  const cookie = Array.isArray(raw) ? raw : [raw as string];
+  sessions.set(email, cookie);
+  return cookie;
 }
 
 beforeAll(async () => {
+  // Before anything destructive happens.
+  assertTestDatabase(process.env.DATABASE_URL);
+
   process.env.NODE_ENV = "test";
   const { createApp } = await import("../src/app.js");
   app = createApp();
 
   // Clean slate. Order matters: children before parents.
   await prisma.auditLog.deleteMany();
+  await prisma.sweepRun.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.sentEmail.deleteMany();
   await prisma.notificationDispatch.deleteMany();
@@ -428,5 +443,176 @@ describe("scheduler idempotency", () => {
     expect(first.body.notificationsSent).toBeGreaterThan(0);
     // The unique constraint on NotificationDispatch is what enforces this.
     expect(second.body.notificationsSent).toBe(0);
+  });
+});
+
+describe("audit trail", () => {
+  /**
+   * The audit rows are produced by real requests rather than inserted
+   * directly, so these also assert that recordAudit is still wired into
+   * the routes that are supposed to write it.
+   */
+  async function changeStatus(status: string) {
+    const cookie = await login(seeded.adminEmail);
+    await request(app)
+      .patch(`/api/equipment/${seeded.ownDeviceId}/status`)
+      .set("Cookie", cookie)
+      .send({ operationalStatus: status })
+      .expect(200);
+  }
+
+  it("records what changed, and the allowlist keeps the rest out", async () => {
+    await changeStatus("UNDER_REPAIR");
+
+    const cookie = await login(seeded.adminEmail);
+    const res = await request(app)
+      .get(`/api/equipment/${seeded.ownDeviceId}/audit`)
+      .set("Cookie", cookie)
+      .expect(200);
+
+    const entry = res.body.rows[0];
+    expect(entry.action).toBe("equipment.status_changed");
+    expect(entry.after.operationalStatus).toBe("UNDER_REPAIR");
+    expect(entry.actor.fullName).toBe("Admin");
+    // The writer takes named fields only; a whole row would carry more.
+    expect(entry.after).not.toHaveProperty("publicToken");
+    expect(entry.after).not.toHaveProperty("id");
+  });
+
+  it("lets the responsible engineer read their own device's history", async () => {
+    await changeStatus("OPERATIONAL");
+
+    const cookie = await login(seeded.engineerEmail);
+    const res = await request(app)
+      .get(`/api/equipment/${seeded.ownDeviceId}/audit`)
+      .set("Cookie", cookie)
+      .expect(200);
+
+    expect(res.body.rows.length).toBeGreaterThan(0);
+  });
+
+  it("returns 404, not 403, for a device outside scope", async () => {
+    const cookie = await login(seeded.engineerEmail);
+    // Same disclosure rule as the device itself: a 403 would confirm it exists.
+    await request(app)
+      .get(`/api/equipment/${seeded.otherDeviceId}/audit`)
+      .set("Cookie", cookie)
+      .expect(404);
+  });
+
+  it("keeps the estate-wide feed to the oversight roles", async () => {
+    const engineer = await login(seeded.engineerEmail);
+    await request(app).get("/api/audit").set("Cookie", engineer).expect(403);
+
+    const admin = await login(seeded.adminEmail);
+    const res = await request(app).get("/api/audit").set("Cookie", admin).expect(200);
+    expect(res.body.total).toBeGreaterThan(0);
+    // Entries resolve to the device they describe, for a readable feed.
+    expect(res.body.rows[0].equipment.assetNo).toBe("T9001");
+  });
+
+  it("filters the feed by action, which is what makes a slippage report", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const res = await request(app)
+      .get("/api/audit?action=equipment.status_changed")
+      .set("Cookie", cookie)
+      .expect(200);
+
+    expect(res.body.rows.length).toBeGreaterThan(0);
+    for (const row of res.body.rows) {
+      expect(row.action).toBe("equipment.status_changed");
+    }
+  });
+
+  it("rejects an unknown filter key outright", async () => {
+    const cookie = await login(seeded.adminEmail);
+    await request(app).get("/api/audit?nonsense=1").set("Cookie", cookie).expect(400);
+  });
+});
+
+describe("scheduler health", () => {
+  it("reports the scheduler without requiring a session, but only coarsely", async () => {
+    const res = await request(app).get("/api/health").expect(200);
+
+    expect(res.body.status).toBe("ok");
+    // The suite never starts a scheduler, so this is the degraded case.
+    expect(res.body.scheduler.healthy).toBe(false);
+    // Unauthenticated: no timestamps, no failure text.
+    expect(res.body.scheduler).not.toHaveProperty("lastSweepAt");
+    expect(res.body.scheduler).not.toHaveProperty("lastError");
+  });
+
+  it("stays 200 when the scheduler is down", async () => {
+    // The container HEALTHCHECK exits non-zero on a non-2xx, and the API
+    // is deliberately usable without the scheduler. Failing here would
+    // turn a degraded system into a restart loop.
+    await request(app).get("/api/health").expect(200);
+  });
+
+  it("keeps the detailed view to the oversight roles", async () => {
+    const engineer = await login(seeded.engineerEmail);
+    await request(app).get("/api/admin/scheduler").set("Cookie", engineer).expect(403);
+
+    const admin = await login(seeded.adminEmail);
+    const res = await request(app).get("/api/admin/scheduler").set("Cookie", admin).expect(200);
+    expect(res.body.running).toBe(false);
+    expect(res.body.freshness).toBe("unknown");
+    expect(res.body.staleAfterHours).toBe(26);
+  });
+
+  it("does not count the admin simulation as a nightly run", async () => {
+    const cookie = await login(seeded.adminEmail);
+    await request(app).post("/api/admin/simulate").set("Cookie", cookie).send({ days: 30 });
+
+    // A hand-run must not make a dead cron look alive.
+    expect(await prisma.sweepRun.count()).toBe(0);
+
+    const res = await request(app).get("/api/admin/scheduler").set("Cookie", cookie).expect(200);
+    expect(res.body.lastSweepAt).toBeNull();
+  });
+});
+
+describe("list contracts", () => {
+  it("serves the grace window rather than leaving the client to derive it", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const res = await request(app)
+      .get(`/api/equipment/${seeded.ownDeviceId}`)
+      .set("Cookie", cookie)
+      .expect(200);
+
+    // 90-day interval, no override: 20% of the interval.
+    expect(res.body.graceWindow).toBe(18);
+  });
+
+  it("pages notifications and mail, counting unread over the whole mailbox", async () => {
+    await prisma.sentEmail.deleteMany();
+    await prisma.sentEmail.createMany({
+      data: Array.from({ length: 30 }, (_, i) => ({
+        to: seeded.engineerEmail,
+        subject: `Message ${i}`,
+        body: "x",
+      })),
+    });
+
+    const cookie = await login(seeded.engineerEmail);
+
+    const first = await request(app).get("/api/mail?pageSize=10").set("Cookie", cookie).expect(200);
+    expect(first.body.rows).toHaveLength(10);
+    expect(first.body.total).toBe(30);
+    // The badge must reflect the mailbox, not the page.
+    expect(first.body.unread).toBe(30);
+
+    const third = await request(app)
+      .get("/api/mail?pageSize=10&page=3")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(third.body.rows).toHaveLength(10);
+    expect(third.body.rows[0].id).not.toBe(first.body.rows[0].id);
+  });
+
+  it("rejects an unknown paging key", async () => {
+    const cookie = await login(seeded.engineerEmail);
+    await request(app).get("/api/mail?nonsense=1").set("Cookie", cookie).expect(400);
+    await request(app).get("/api/notifications?nonsense=1").set("Cookie", cookie).expect(400);
   });
 });

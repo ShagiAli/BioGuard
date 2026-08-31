@@ -5,4 +5,5 @@
 !**/.env.example
 docs
 server/tests
-*.log
+# Nested too: a stray server/debug.log must not reach the image.
+**/*.log

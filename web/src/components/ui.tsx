@@ -21,6 +21,9 @@ export function Badge({ tone = "slate", children }: { tone?: Tone; children: Rea
   );
 }
 
+// Tone mapping belongs beside the Badge it feeds. Same trade-off as in
+// auth.tsx: colocation over fast-refresh granularity.
+// eslint-disable-next-line react-refresh/only-export-components
 export function pmTone(state: string): Tone {
   if (state === "OVERDUE") return "rose";
   if (state === "DUE_NOW") return "amber";
@@ -105,5 +108,48 @@ export function Button({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Page footer for any paginated list.
+ *
+ * Extracted from the equipment table when notifications and mail gained
+ * paging, so all three step through results identically rather than
+ * growing three slightly different footers.
+ */
+export function Pager({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (next: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
+      <span>
+        Page {page} of {totalPages}
+      </span>
+      <div className="flex gap-2">
+        <button
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+          className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <button
+          disabled={page >= totalPages}
+          onClick={() => onChange(page + 1)}
+          className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
   );
 }

@@ -14,7 +14,10 @@ FROM node:22-alpine AS api
 WORKDIR /api
 COPY server/package*.json ./
 RUN npm ci
+# prisma.config.ts carries the datasource URL from Prisma 7 onwards, so
+# generate and migrate both need it alongside the schema.
 COPY server/prisma ./prisma
+COPY server/prisma.config.ts ./
 RUN npx prisma generate
 COPY server/tsconfig.json server/tsconfig.build.json ./
 COPY server/src ./src
@@ -33,9 +36,13 @@ COPY --from=api /api/node_modules/.prisma ./node_modules/.prisma
 COPY --from=api /api/node_modules/@prisma ./node_modules/@prisma
 COPY --from=api /api/dist ./dist
 COPY server/prisma ./prisma
+COPY server/prisma.config.ts ./
 COPY --from=web /web/dist ./public
 
 USER node
 EXPOSE 4000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+  CMD node -e "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/index.js"]
