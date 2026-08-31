@@ -35,6 +35,17 @@ updates:
       # typescript-eslint/typescript-eslint#10940 lands.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # pg-boss 12 cannot migrate an existing schema — it refuses
+      # anything below version 25, and 11 fails from 24 as well. The
+      # upgrade needs DROP SCHEMA pgboss CASCADE on every environment;
+      # DEPLOYMENT.md carries the procedure.
+      #
+      # This one is held for a sharper reason than the others: no test
+      # starts the scheduler, so CI passes on a pg-boss bump and the
+      # breakage appears only in production, quietly, as reminders that
+      # stop arriving. A green tick would be actively misleading here.
+      - dependency-name: "pg-boss"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /web
@@ -63,6 +74,15 @@ updates:
       day: monday
       timezone: Europe/Istanbul
     labels: ["dependencies", "docker"]
+    ignore:
+      # Patch and minor bumps of node:22-alpine are welcome; a major is
+      # not, on its own. @types/node is pinned to the 22 line precisely
+      # because the runtime is Node 22, so moving the image alone would
+      # leave the compiler describing a different runtime from the one
+      # the code runs on. Move the image and @types/node together, or
+      # neither.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   # ci.yml pins actions by major tag; this keeps those current.
   - package-ecosystem: github-actions
