@@ -3,14 +3,14 @@
 # first-party, which SameSite=Strict requires — splitting the frontend
 # onto a separate domain would make the browser drop it silently.
 
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM node:22-alpine AS api
+FROM node:26-alpine AS api
 WORKDIR /api
 COPY server/package*.json ./
 RUN npm ci
@@ -24,7 +24,7 @@ COPY server/src ./src
 RUN npm run build
 RUN test -f dist/src/index.js || (echo "build produced no entry point" && exit 1)
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV SERVE_WEB=true
