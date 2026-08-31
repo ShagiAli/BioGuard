@@ -9,7 +9,6 @@
 
 import express from "express";
 import helmet from "helmet";
-import cors from "cors";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { pinoHttp } from "pino-http";
@@ -53,7 +52,11 @@ export function createApp() {
     })
   );
 
-  app.use(cors({ origin: env.APP_URL, credentials: true }));
+  // No CORS middleware: every supported deployment is single-origin.
+  // The session cookie is SameSite=Strict, so a frontend on another
+  // domain could not hold a session anyway. Sending no
+  // Access-Control-Allow-Origin at all is stricter than an allowlist —
+  // the browser refuses every cross-origin read by default.
   app.use(express.json({ limit: "100kb" }));
   app.use(cookieParser());
 

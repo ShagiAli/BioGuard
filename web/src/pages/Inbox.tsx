@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Mail, Trash2 } from "lucide-react";
 import { api, formatDate } from "../lib/api";
-import { Card, ErrorNote, Spinner } from "../components/ui";
+import { Card, ErrorNote, Pager, Spinner } from "../components/ui";
 
 interface SentEmail {
   id: string;
@@ -16,11 +16,19 @@ interface SentEmail {
 export function Inbox() {
   const qc = useQueryClient();
   const [open, setOpen] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const query = useQuery({
-    queryKey: ["mail"],
+    queryKey: ["mail", page],
     queryFn: () =>
-      api.get<{ rows: SentEmail[]; unread: number; scope: "all" | "own" }>("/api/mail"),
+      api.get<{
+        total: number;
+        pageSize: number;
+        rows: SentEmail[];
+        unread: number;
+        scope: "all" | "own";
+      }>(`/api/mail?page=${page}`),
+    placeholderData: keepPreviousData,
   });
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["mail"] });
@@ -44,6 +52,7 @@ export function Inbox() {
   if (query.isError) return <ErrorNote message="Could not load the mailbox." />;
 
   const { rows, scope } = query.data!;
+  const totalPages = Math.ceil(query.data!.total / query.data!.pageSize);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -135,6 +144,12 @@ export function Inbox() {
             );
           })}
         </ul>
+      )}
+
+      {totalPages > 1 && (
+        <Card className="mt-2">
+          <Pager page={page} totalPages={totalPages} onChange={setPage} />
+        </Card>
       )}
     </div>
   );

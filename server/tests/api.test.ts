@@ -571,3 +571,48 @@ describe("scheduler health", () => {
     expect(res.body.lastSweepAt).toBeNull();
   });
 });
+
+describe("list contracts", () => {
+  it("serves the grace window rather than leaving the client to derive it", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const res = await request(app)
+      .get(`/api/equipment/${seeded.ownDeviceId}`)
+      .set("Cookie", cookie)
+      .expect(200);
+
+    // 90-day interval, no override: 20% of the interval.
+    expect(res.body.graceWindow).toBe(18);
+  });
+
+  it("pages notifications and mail, counting unread over the whole mailbox", async () => {
+    await prisma.sentEmail.deleteMany();
+    await prisma.sentEmail.createMany({
+      data: Array.from({ length: 30 }, (_, i) => ({
+        to: seeded.engineerEmail,
+        subject: `Message ${i}`,
+        body: "x",
+      })),
+    });
+
+    const cookie = await login(seeded.engineerEmail);
+
+    const first = await request(app).get("/api/mail?pageSize=10").set("Cookie", cookie).expect(200);
+    expect(first.body.rows).toHaveLength(10);
+    expect(first.body.total).toBe(30);
+    // The badge must reflect the mailbox, not the page.
+    expect(first.body.unread).toBe(30);
+
+    const third = await request(app)
+      .get("/api/mail?pageSize=10&page=3")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(third.body.rows).toHaveLength(10);
+    expect(third.body.rows[0].id).not.toBe(first.body.rows[0].id);
+  });
+
+  it("rejects an unknown paging key", async () => {
+    const cookie = await login(seeded.engineerEmail);
+    await request(app).get("/api/mail?nonsense=1").set("Cookie", cookie).expect(400);
+    await request(app).get("/api/notifications?nonsense=1").set("Cookie", cookie).expect(400);
+  });
+});

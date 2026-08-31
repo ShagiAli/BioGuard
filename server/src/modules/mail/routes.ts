@@ -19,17 +19,36 @@ import { oversees, requireAuth } from "../../middleware/auth.js";
 
 export const mailRouter = Router();
 
+/** Same shape as the equipment list, so paging behaves identically. */
+const listQuery = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  })
+  .strict();
+
 mailRouter.get("/", requireAuth, async (req, res) => {
+  const parsed = listQuery.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Unrecognised filter." });
+
+  const { page, pageSize } = parsed.data;
   const all = oversees(req.user!);
   const where = all ? {} : { to: req.user!.email };
 
-  // Counted rather than derived from `rows`, which is capped at 100.
-  const [rows, unread] = await Promise.all([
-    prisma.sentEmail.findMany({ where, orderBy: { sentAt: "desc" }, take: 100 }),
+  // Counted rather than derived from `rows`, for the same reason as the
+  // notification badge: `rows` is one page, not the mailbox.
+  const [total, rows, unread] = await Promise.all([
+    prisma.sentEmail.count({ where }),
+    prisma.sentEmail.findMany({
+      where,
+      orderBy: { sentAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
     prisma.sentEmail.count({ where: { ...where, readAt: null } }),
   ]);
 
-  res.json({ rows, unread, scope: all ? "all" : "own" });
+  res.json({ total, page, pageSize, rows, unread, scope: all ? "all" : "own" });
 });
 
 mailRouter.post("/read-all", requireAuth, async (req, res) => {

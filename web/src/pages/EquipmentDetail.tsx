@@ -6,6 +6,8 @@ import {
   api,
   ApiError,
   AUDIT_ACTION_LABELS,
+  canSeeCosts,
+  MAINTENANCE_TYPES,
   daysUntil,
   formatDate,
   formatMoney,
@@ -27,7 +29,7 @@ export function EquipmentDetail() {
   const [toast, setToast] = useState<string | null>(null);
 
   const canRecord = user?.role === "ADMIN" || user?.role === "ENGINEER";
-  const canSeeCost = user?.role !== "STAFF";
+  const canSeeCost = canSeeCosts(user?.role);
 
   const query = useQuery({
     queryKey: ["equipment", id],
@@ -39,7 +41,8 @@ export function EquipmentDetail() {
 
   const d = query.data!;
   const remaining = daysUntil(d.nextDueAt);
-  const grace = d.graceDaysOverride ?? Math.round(d.intervalDays * 0.2);
+  // Served by the API from the same function the scheduler uses.
+  const grace = d.graceWindow;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -358,7 +361,7 @@ function RecordDialog({
               onChange={(e) => setForm({ ...form, type: e.target.value })}
               className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm"
             >
-              {["PREVENTIVE", "CORRECTIVE", "INSPECTION", "SAFETY_TEST", "CALIBRATION"].map((t) => (
+              {MAINTENANCE_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {titleCase(t)}
                 </option>

@@ -114,6 +114,8 @@ export interface MaintenanceRecord {
 export interface EquipmentDetail extends EquipmentRow {
   intervalSource: string;
   graceDaysOverride: number | null;
+  /** Computed server-side from the scheduling rules, never re-derived here. */
+  graceWindow: number;
   warrantyEndsAt: string | null;
   purchasePrice: string | null;
   category: { name: string };
@@ -178,6 +180,33 @@ export const STATUS_LABELS: Record<OperationalStatus, string> = {
   OUT_OF_SERVICE: "Out of service",
   RETIRED: "Retired",
 };
+
+/**
+ * The maintenance types the API accepts, in the order the schema
+ * declares them. Kept as one list so a form cannot quietly offer a
+ * subset — EMERGENCY was missing from the record dialog for exactly
+ * that reason.
+ */
+export const MAINTENANCE_TYPES = [
+  "PREVENTIVE",
+  "CORRECTIVE",
+  "EMERGENCY",
+  "CALIBRATION",
+  "INSPECTION",
+  "SAFETY_TEST",
+] as const;
+
+/**
+ * Mirrors canSeeCosts() in the server's auth middleware.
+ *
+ * Written as the same explicit allowlist rather than `role !==
+ * "STAFF"`. The two are equivalent for today's four roles and would
+ * diverge the moment a fifth is added, with the UI showing a field the
+ * API strips.
+ */
+export function canSeeCosts(role: Role | undefined): boolean {
+  return role === "ADMIN" || role === "ENGINEER" || role === "MANAGER";
+}
 
 export function titleCase(value: string): string {
   return value.charAt(0) + value.slice(1).toLowerCase().replace(/_/g, " ");

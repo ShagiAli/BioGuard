@@ -73,9 +73,13 @@ Logs redact `authorization`, `cookie`, and any field named `password`,
 ## Transport and errors
 
 Helmet sets a CSP, `nosniff`, `frame-ancestors 'none'`, and HSTS in
-production. CORS uses an explicit origin allowlist with credentials,
-never a wildcard. Error responses carry a correlation id and nothing
-else; stack traces stay in the logs.
+production. There is no CORS middleware, deliberately: every supported
+deployment serves the frontend and the API from one origin, and the
+session cookie is `SameSite=Strict`, so a frontend on another domain
+could not hold a session in any case. Sending no
+`Access-Control-Allow-Origin` is stricter than an allowlist — the
+browser refuses every cross-origin read by default. Error responses
+carry a correlation id and nothing else; stack traces stay in the logs.
 
 ## Secrets
 

@@ -10,7 +10,7 @@ import {
   titleCase,
   type EquipmentRow,
 } from "../lib/api";
-import { Badge, Card, Empty, ErrorNote, Spinner, pmTone } from "../components/ui";
+import { Badge, Card, Empty, ErrorNote, Pager, Spinner, pmTone } from "../components/ui";
 
 const PM_OPTIONS = ["OVERDUE", "DUE_30", "DUE_NOW", "DUE_SOON", "SCHEDULED"] as const;
 const CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
@@ -61,11 +61,20 @@ export function Equipment() {
    */
   useEffect(() => {
     const timer = setTimeout(() => {
+      // Only act when the typed term differs from the one in the URL.
+      // The effect re-runs on every params change (it must, or it writes
+      // a stale snapshot), and it resets to page 1 because a new search
+      // invalidates the old page number. Without this guard those two
+      // facts combine badly: paging to 2 re-runs the effect, which then
+      // strips `page` right back off again.
+      const current = params.get("q") ?? "";
+      if (search === current) return;
+
       const next = new URLSearchParams(params);
       if (search) next.set("q", search);
       else next.delete("q");
       next.delete("page");
-      if (next.toString() !== params.toString()) setParams(next, { replace: true });
+      setParams(next, { replace: true });
     }, 300);
     return () => clearTimeout(timer);
   }, [search, params, setParams]);
@@ -79,12 +88,27 @@ export function Equipment() {
     placeholderData: keepPreviousData,
   });
 
+  /**
+   * Changing a filter always returns to the first page, since the old
+   * page number rarely exists in the narrowed result set.
+   *
+   * Which is exactly why paging must not go through here: `setFilter`
+   * drops `page` unconditionally, so routing the pager through it set
+   * the page and then deleted it in the same breath. The Next button
+   * silently did nothing.
+   */
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
     else next.delete(key);
     next.delete("page");
     setParams(next);
+  };
+
+  const goToPage = (next: number) => {
+    const params2 = new URLSearchParams(params);
+    params2.set("page", String(next));
+    setParams(params2);
   };
 
   const active = [...params.entries()].filter(([k]) => k !== "page" && k !== "pageSize");
@@ -240,28 +264,8 @@ export function Equipment() {
           </table>
         )}
 
-        {query.data && totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
-            <span>
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1}
-                onClick={() => setFilter("page", String(page - 1))}
-                className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Previous
-              </button>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setFilter("page", String(page + 1))}
-                className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+        {query.data && (
+          <Pager page={page} totalPages={totalPages} onChange={goToPage} />
         )}
       </Card>
     </div>

@@ -12,22 +12,25 @@ import {
   Mail,
   RotateCcw,
 } from "lucide-react";
-import { api, formatDate, titleCase, type Notification, type SchedulerHealth } from "../lib/api";
+import { api, formatDate, titleCase, type SchedulerHealth } from "../lib/api";
 import { useAuth } from "../auth";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
+  // Only the unread counts are needed here, and those are counted over
+  // the whole mailbox rather than the page — so ask for the smallest
+  // page the API allows instead of pulling rows the sidebar never draws.
   const { data } = useQuery({
-    queryKey: ["notifications"],
-    queryFn: () => api.get<{ rows: Notification[]; unread: number }>("/api/notifications"),
+    queryKey: ["notifications", "badge"],
+    queryFn: () => api.get<{ unread: number }>("/api/notifications?pageSize=1"),
     refetchInterval: 60_000,
   });
 
   const mail = useQuery({
-    queryKey: ["mail"],
-    queryFn: () => api.get<{ rows: unknown[]; unread: number }>("/api/mail"),
+    queryKey: ["mail", "badge"],
+    queryFn: () => api.get<{ unread: number }>("/api/mail?pageSize=1"),
     refetchInterval: 60_000,
   });
 

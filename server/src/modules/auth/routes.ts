@@ -52,7 +52,13 @@ const loginAccountLimiter = rateLimit({
   message: TOO_MANY,
 });
 
-const resetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, message: TOO_MANY });
+const resetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: TOO_MANY,
+});
 
 function setSessionCookie(res: import("express").Response, token: string) {
   res.cookie(SESSION_COOKIE, token, {

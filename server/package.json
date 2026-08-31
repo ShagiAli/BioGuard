@@ -30,7 +30,6 @@
     "@prisma/client": "^7.10.0",
     "argon2": "^0.45.1",
     "cookie-parser": "1.4.7",
-    "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
@@ -45,7 +44,6 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/cookie-parser": "^1.4.10",
-    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "22.10.2",
     "@types/nodemailer": "^8.0.1",

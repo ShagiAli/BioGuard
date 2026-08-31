@@ -6,7 +6,7 @@ import { prisma } from "../../lib/prisma.js";
 import { env } from "../../env.js";
 import { recordAudit } from "../../lib/audit.js";
 import { canSeeCosts, equipmentScope, requireAuth, requireRole } from "../../middleware/auth.js";
-import { addDays, pmState, toDay } from "../../scheduler/rules.js";
+import { addDays, graceDays, pmState, toDay } from "../../scheduler/rules.js";
 
 export const equipmentRouter = Router();
 
@@ -156,7 +156,15 @@ equipmentRouter.get("/:id", requireAuth, async (req, res) => {
     ? device.maintenance
     : device.maintenance.map(({ cost, ...rest }) => rest);
 
-  res.json({ ...safe, maintenance, pmState: pmState(device.nextDueAt, toDay(new Date())) });
+  res.json({
+    ...safe,
+    maintenance,
+    pmState: pmState(device.nextDueAt, toDay(new Date())),
+    // Computed here from the same function the scheduler uses, so the
+    // UI cannot drift from the rule by holding its own copy of the
+    // ratio — which it previously did.
+    graceWindow: graceDays(device.intervalDays, device.graceDaysOverride),
+  });
 });
 
 /**
@@ -214,7 +222,12 @@ equipmentRouter.get("/:id/qr", requireAuth, async (req, res) => {
  * the bedside, which means it returns the bare minimum and nothing
  * that would be useful to someone who found a discarded label.
  */
-const scanLimiter = rateLimit({ windowMs: 60_000, limit: 30 });
+const scanLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 equipmentRouter.get("/public/:token", scanLimiter, async (req, res) => {
   const token = z.string().min(20).max(64).safeParse(req.params.token);

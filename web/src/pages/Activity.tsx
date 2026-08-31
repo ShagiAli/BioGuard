@@ -23,7 +23,7 @@ import {
   formatDate,
   type AuditEntry,
 } from "../lib/api";
-import { Badge, Card, Empty, ErrorNote, Spinner } from "../components/ui";
+import { Badge, Card, Empty, ErrorNote, Pager, Spinner } from "../components/ui";
 
 interface Feed {
   total: number;
@@ -97,29 +97,7 @@ export function Activity() {
           </ul>
         )}
 
-        {query.data && totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
-            <span>
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-                className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Previous
-              </button>
-              <button
-                disabled={page >= totalPages}
-                onClick={() => setPage(page + 1)}
-                className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        )}
+        {query.data && <Pager page={page} totalPages={totalPages} onChange={setPage} />}
       </Card>
     </div>
   );
