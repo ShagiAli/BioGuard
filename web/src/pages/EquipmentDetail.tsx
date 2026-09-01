@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarClock, QrCode, Wrench, X } from "lucide-react";
+import { ArrowLeft, CalendarClock, QrCode, Siren, Wrench, X } from "lucide-react";
 import {
   api,
   ApiError,
@@ -19,6 +19,7 @@ import {
 } from "../lib/api";
 import { Badge, Button, Card, ErrorNote, Field, Spinner, pmTone } from "../components/ui";
 import { AuditDiff } from "./Activity";
+import { ReportProblem } from "../components/ReportProblem";
 import { useAuth } from "../auth";
 
 export function EquipmentDetail() {
@@ -26,6 +27,7 @@ export function EquipmentDetail() {
   const { user } = useAuth();
   const [recording, setRecording] = useState(false);
   const [showQr, setShowQr] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const canRecord = user?.role === "ADMIN" || user?.role === "ENGINEER";
@@ -70,6 +72,12 @@ export function EquipmentDetail() {
           <Button variant="ghost" onClick={() => setShowQr(true)}>
             <span className="flex items-center gap-1.5">
               <QrCode size={15} /> QR label
+            </span>
+          </Button>
+          {/* Anyone who can see the device can report a fault on it. */}
+          <Button variant="danger" onClick={() => setReporting(true)}>
+            <span className="flex items-center gap-1.5">
+              <Siren size={15} /> Report a problem
             </span>
           </Button>
           {canRecord && (
@@ -208,6 +216,14 @@ export function EquipmentDetail() {
       )}
 
       {showQr && <QrDialog device={d} onClose={() => setShowQr(false)} />}
+
+      {reporting && (
+        <ReportProblem
+          equipmentId={d.id}
+          deviceName={`${d.name} · ${d.assetNo}`}
+          onClose={() => setReporting(false)}
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-5 left-1/2 z-50 max-w-md -translate-x-1/2 rounded-lg bg-slate-900 px-4 py-3 text-sm text-white shadow-lg">

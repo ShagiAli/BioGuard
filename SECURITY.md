@@ -14,7 +14,10 @@ be revoked, so a departed employee or a demoted account stays valid
 until expiry — the wrong trade in a hospital. The cookie value is stored
 only as a SHA-256 digest, so a database leak does not hand over live
 sessions. Cookies are `httpOnly`, `Secure` in production, and
-`SameSite=Strict`, which is also the primary CSRF defence. Changing a
+`SameSite=Strict`, which is also the primary CSRF defence. The cookie is
+signed with `SESSION_SECRET`, so a forged or altered value is rejected in
+middleware before it reaches a database lookup — the token is already
+unguessable, and this is the belt to that pair of braces. Changing a
 password sets `passwordChangedAt` and invalidates every session issued
 before it.
 

@@ -29,6 +29,8 @@ import { adminRouter } from "./modules/admin/routes.js";
 import { notificationsRouter } from "./modules/notifications/routes.js";
 import { mailRouter } from "./modules/mail/routes.js";
 import { auditRouter } from "./modules/audit/routes.js";
+import { alertsRouter } from "./modules/alerts/routes.js";
+import { workOrdersRouter } from "./modules/work-orders/routes.js";
 
 export function createApp() {
   const app = express();
@@ -58,7 +60,11 @@ export function createApp() {
   // Access-Control-Allow-Origin at all is stricter than an allowlist —
   // the browser refuses every cross-origin read by default.
   app.use(express.json({ limit: "100kb" }));
-  app.use(cookieParser());
+  // Signed with SESSION_SECRET, which until now was validated at boot
+  // and then never used — a control that existed only in the
+  // documentation. A forged or mangled cookie is now rejected here,
+  // before it reaches a database lookup.
+  app.use(cookieParser(env.SESSION_SECRET));
 
   // Request logging is noise in a test run.
   if (env.NODE_ENV !== "test") {
@@ -121,6 +127,8 @@ export function createApp() {
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/mail", mailRouter);
   app.use("/api/audit", auditRouter);
+  app.use("/api/alerts", alertsRouter);
+  app.use("/api/work-orders", workOrdersRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
 

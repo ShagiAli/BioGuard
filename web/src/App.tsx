@@ -7,6 +7,10 @@ import { EquipmentDetail } from "./pages/EquipmentDetail";
 import { Notifications } from "./pages/Notifications";
 import { Inbox } from "./pages/Inbox";
 import { Activity } from "./pages/Activity";
+import { Alerts } from "./pages/Alerts";
+import { AlertDetail } from "./pages/AlertDetail";
+import { WorkOrderDetail } from "./pages/WorkOrderDetail";
+import { WorkOrders } from "./pages/WorkOrders";
 import { Scan } from "./pages/Scan";
 import { ForgotPassword, ResetPassword } from "./passwordReset";
 import { Spinner } from "./components/ui";
@@ -55,6 +59,10 @@ function Shell() {
         <Route path="/mail" element={<Inbox />} />
         {/* Role-gated in the API too; this only hides the link. */}
         <Route path="/activity" element={<Activity />} />
+        <Route path="/alerts" element={<Alerts />} />
+        <Route path="/alerts/:id" element={<AlertDetail />} />
+        <Route path="/work-orders" element={<WorkOrders />} />
+        <Route path="/work-orders/:id" element={<WorkOrderDetail />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

@@ -56,7 +56,7 @@ export const api = {
 
 // ------------------------------------------------------------- types
 
-export type Role = "ADMIN" | "ENGINEER" | "STAFF" | "MANAGER";
+export type Role = "ADMIN" | "ENGINEER" | "STAFF" | "MANAGER" | "HEAD_OF_ALERTS";
 
 export interface User {
   id: string;
@@ -308,12 +308,225 @@ export function auditChanges(entry: AuditEntry): AuditChange[] {
   const after = entry.after ?? {};
   const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
 
+  // undefined and null both mean "absent", and they differ constantly on
+  // a creation event, where there is no `before` at all. Comparing them
+  // literally reports every empty optional field as a change.
+  const same = (a: unknown, b: unknown) =>
+    (a ?? null) === null && (b ?? null) === null
+      ? true
+      : JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
   return keys
-    .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+    .filter((key) => !same(before[key], after[key]))
+    // Foreign keys stay in the audit table for forensics, but a bare
+    // UUID tells a reader nothing. Who something was assigned to is
+    // shown by name on the record itself; here it would only be noise.
+    .filter((key) => !/Id$/.test(key))
     .map((key) => ({
       field: key,
       label: AUDIT_FIELD_LABELS[key] ?? humanise(key),
       from: auditValue(key, before[key]),
       to: auditValue(key, after[key]),
     }));
+}
+
+// ------------------------------------------- alerts and work orders
+
+export type Priority = "EMERGENCY" | "MEDIUM" | "LOW";
+
+export type AlertStatus =
+  | "OPEN"
+  | "ACKNOWLEDGED"
+  | "ASSIGNED"
+  | "IN_PROGRESS"
+  | "RESOLVED"
+  | "CANCELLED";
+
+export type WorkOrderStatus =
+  | "INVESTIGATING"
+  | "AWAITING_PARTS"
+  | "IN_REPAIR"
+  | "COMPLETED"
+  | "CLOSED"
+  | "CANCELLED";
+
+export interface Alert {
+  id: string;
+  number: string;
+  description: string;
+  priority: Priority;
+  status: AlertStatus;
+  openedAt: string;
+  acknowledgedAt: string | null;
+  assignedAt: string | null;
+  resolvedAt: string | null;
+  cancelledReason: string | null;
+  equipment: {
+    id: string;
+    name: string;
+    assetNo: string;
+    operationalStatus: OperationalStatus;
+    department: { name: string };
+    room: { code: string } | null;
+  };
+  raisedBy: { id: string; fullName: string };
+  acknowledgedBy: { id: string; fullName: string } | null;
+  assignedTo: { id: string; fullName: string } | null;
+  workOrder: {
+    id: string;
+    seq: number;
+    status: WorkOrderStatus;
+    createdAt: string;
+    parts: Pick<WorkOrderPart, "id" | "name" | "quantity" | "status" | "orderedAt">[];
+  } | null;
+  duplicateOf?: { id: string; number: string } | null;
+}
+
+export interface WorkOrder {
+  id: string;
+  number: string;
+  status: WorkOrderStatus;
+  priority: Priority;
+  findings: string | null;
+  diagnosis: string | null;
+  repairActions: string | null;
+  finalResolution: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  closedAt: string | null;
+  maintenanceRecordId: string | null;
+  alert: {
+    id: string;
+    description: string;
+    priority: Priority;
+    status: AlertStatus;
+    raisedBy: { id: string; fullName: string };
+  };
+  parts: WorkOrderPart[];
+  equipment: { id: string; name: string; assetNo: string; operationalStatus: OperationalStatus };
+  engineer: { id: string; fullName: string };
+  closedBy: { id: string; fullName: string } | null;
+}
+
+export type PartStatus =
+  | "REQUIRED"
+  | "REQUESTED"
+  | "ORDERED"
+  | "RECEIVED"
+  | "INSTALLED"
+  | "CANCELLED";
+
+export interface WorkOrderPart {
+  id: string;
+  name: string;
+  partNumber: string | null;
+  quantity: number;
+  status: PartStatus;
+  notes: string | null;
+  requestedAt: string | null;
+  orderedAt: string | null;
+  receivedAt: string | null;
+  installedAt: string | null;
+  cancelledAt: string | null;
+}
+
+/** The rung a part may climb to next; empty once it is finished. */
+export const NEXT_PART_STATUS: Record<PartStatus, PartStatus | null> = {
+  REQUIRED: "REQUESTED",
+  REQUESTED: "ORDERED",
+  ORDERED: "RECEIVED",
+  RECEIVED: "INSTALLED",
+  INSTALLED: null,
+  CANCELLED: null,
+};
+
+export const PART_STATUS_LABELS: Record<PartStatus, string> = {
+  REQUIRED: "Required",
+  REQUESTED: "Requested",
+  ORDERED: "Ordered",
+  RECEIVED: "Received",
+  INSTALLED: "Installed",
+  CANCELLED: "Cancelled",
+};
+
+/** The button that advances a part says what it does, not where it lands. */
+export const PART_ADVANCE_LABELS: Record<PartStatus, string> = {
+  REQUIRED: "Request",
+  REQUESTED: "Mark ordered",
+  ORDERED: "Mark received",
+  RECEIVED: "Mark installed",
+  INSTALLED: "",
+  CANCELLED: "",
+};
+
+export function partTone(status: PartStatus): "emerald" | "amber" | "sky" | "slate" {
+  if (status === "INSTALLED") return "emerald";
+  if (status === "CANCELLED") return "slate";
+  if (status === "REQUIRED") return "amber";
+  return "sky";
+}
+
+export function isPartOutstanding(status: PartStatus): boolean {
+  return status !== "INSTALLED" && status !== "CANCELLED";
+}
+
+export interface WorkOrderSummary {
+  inProgress: number;
+  awaitingParts: number;
+  partsOrdered: number;
+  closed: number;
+}
+
+export interface AlertSummary {
+  open: number;
+  emergency: number;
+  medium: number;
+  low: number;
+  awaitingAssignment: number;
+  inProgress: number;
+}
+
+export const PRIORITIES: Priority[] = ["EMERGENCY", "MEDIUM", "LOW"];
+
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  EMERGENCY: "Emergency",
+  MEDIUM: "Medium",
+  LOW: "Low",
+};
+
+export const ALERT_STATUS_LABELS: Record<AlertStatus, string> = {
+  OPEN: "Open",
+  ACKNOWLEDGED: "Received",
+  ASSIGNED: "Assigned",
+  IN_PROGRESS: "Under investigation",
+  RESOLVED: "Resolved",
+  CANCELLED: "Cancelled",
+};
+
+export const WORK_ORDER_STATUS_LABELS: Record<WorkOrderStatus, string> = {
+  INVESTIGATING: "Investigating",
+  AWAITING_PARTS: "Awaiting parts",
+  IN_REPAIR: "In repair",
+  COMPLETED: "Completed",
+  CLOSED: "Closed",
+  CANCELLED: "Cancelled",
+};
+
+/** Emergency reads red, medium amber, low neutral — the same tones as PM state. */
+export function priorityTone(priority: Priority): "rose" | "amber" | "slate" {
+  if (priority === "EMERGENCY") return "rose";
+  if (priority === "MEDIUM") return "amber";
+  return "slate";
+}
+
+export function alertStatusTone(status: AlertStatus): "emerald" | "sky" | "amber" | "slate" {
+  if (status === "RESOLVED") return "emerald";
+  if (status === "CANCELLED") return "slate";
+  if (status === "OPEN") return "amber";
+  return "sky";
+}
+
+/** Who triages: mirrors triagesAlerts() on the server. */
+export function triagesAlerts(role: Role | undefined): boolean {
+  return role === "ADMIN" || role === "HEAD_OF_ALERTS";
 }

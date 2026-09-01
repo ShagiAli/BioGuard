@@ -87,6 +87,10 @@ async function main() {
     prisma.sweepRun.deleteMany(),
     prisma.notification.deleteMany(),
     prisma.notificationDispatch.deleteMany(),
+    // Work orders reference alerts, and alerts reference the users and
+    // equipment deleted below.
+    prisma.workOrder.deleteMany(),
+    prisma.alert.deleteMany(),
     // Mail is addressed by email string, not by foreign key, so it
     // survives the user rows being deleted. Without this, reminders
     // from the previous seed reappear in the new engineers' mailboxes.
@@ -184,6 +188,15 @@ async function main() {
 
   await prisma.user.create({
     data: {
+      email: "alerts@bioguard.local",
+      passwordHash: await hashPassword(demoPassword),
+      fullName: "Priya Raman",
+      role: "HEAD_OF_ALERTS",
+    },
+  });
+
+  await prisma.user.create({
+    data: {
       email: "nurse@bioguard.local",
       passwordHash: await hashPassword(demoPassword),
       fullName: "Grace Miller",
@@ -268,6 +281,7 @@ async function main() {
   console.log("  Administrator:  " + admin.email + "  /  " + adminPassword);
   console.log("  Engineer:       engineer1@bioguard.local  /  " + demoPassword);
   console.log("  Manager:        manager@bioguard.local  /  " + demoPassword);
+  console.log("  Head of alerts: alerts@bioguard.local  /  " + demoPassword);
   console.log("  Ward staff:     nurse@bioguard.local  /  " + demoPassword);
   console.log("\nThese are printed once. Note them now.\n");
 }

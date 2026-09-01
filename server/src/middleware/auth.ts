@@ -40,7 +40,10 @@ declare global {
  * `requireAuth`'s job — so public routes can still know who is calling.
  */
 export async function loadSession(req: Request, _res: Response, next: NextFunction) {
-  const raw = req.cookies?.[SESSION_COOKIE];
+  // signedCookies, not cookies: express puts `false` here when the
+  // signature does not verify, so a tampered value never reaches the
+  // session lookup.
+  const raw = req.signedCookies?.[SESSION_COOKIE];
   if (!raw || typeof raw !== "string") return next();
 
   const session = await prisma.session.findUnique({
@@ -93,14 +96,28 @@ export function requireRole(...roles: Role[]) {
  * route.
  */
 export function equipmentScope(user: SessionUser) {
-  if (user.role === "ADMIN" || user.role === "MANAGER") return {};
+  // Estate-wide roles. HEAD_OF_ALERTS belongs here because triage is
+  // hospital-wide: faults arrive from every ward, and somebody who
+  // cannot see the device an alert names cannot judge it. Without this
+  // they fall to the department branch below, hold no department, and
+  // silently see nothing at all.
+  if (user.role === "ADMIN" || user.role === "MANAGER" || user.role === "HEAD_OF_ALERTS") {
+    return {};
+  }
   if (!user.departmentId) return { id: "00000000-0000-0000-0000-000000000000" }; // matches nothing
   return { departmentId: user.departmentId };
 }
 
 /** Fields a ward-staff caller is allowed to see. Costs are not among them. */
 export function canSeeCosts(user: SessionUser): boolean {
-  return user.role === "ADMIN" || user.role === "ENGINEER" || user.role === "MANAGER";
+  return (
+    user.role === "ADMIN" ||
+    user.role === "ENGINEER" ||
+    user.role === "MANAGER" ||
+    // Triage weighs a repair against replacing the device, which needs
+    // the figures. Ward staff remain the only role without them.
+    user.role === "HEAD_OF_ALERTS"
+  );
 }
 
 /**
@@ -119,4 +136,46 @@ export function canSeeCosts(user: SessionUser): boolean {
  */
 export function oversees(user: SessionUser): boolean {
   return user.role === "ADMIN" || user.role === "MANAGER";
+}
+
+/**
+ * Who triages incoming alerts.
+ *
+ * Deliberately not `oversees()`. That decides who sees the whole
+ * preventive programme; this decides who may acknowledge an alert and
+ * hand it to an engineer. A manager watching maintenance drift should not
+ * silently acquire the power to assign work, which is exactly what would
+ * happen if these shared a helper.
+ */
+export function triagesAlerts(user: SessionUser): boolean {
+  return user.role === "ADMIN" || user.role === "HEAD_OF_ALERTS";
+}
+
+/**
+ * The scope filter every alert query must spread into its `where`.
+ *
+ * Mirrors equipmentScope: centralised so that omitting it is a visible
+ * mistake rather than a silent leak.
+ *
+ *  - triage roles and managers see the whole stream
+ *  - an engineer sees what is assigned to them, plus their department's
+ *  - everyone else sees what they raised
+ *
+ * Ward staff are scoped to what they raised rather than to their
+ * department, because an alert is a personal thread: the nurse who
+ * reported the fault is the one waiting on an answer.
+ */
+export function alertScope(user: SessionUser) {
+  if (triagesAlerts(user) || user.role === "MANAGER") return {};
+
+  if (user.role === "ENGINEER") {
+    return {
+      OR: [
+        { assignedToId: user.id },
+        ...(user.departmentId ? [{ equipment: { departmentId: user.departmentId } }] : []),
+      ],
+    };
+  }
+
+  return { raisedById: user.id };
 }

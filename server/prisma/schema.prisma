@@ -32,6 +32,10 @@ enum Role {
   ENGINEER
   STAFF
   MANAGER
+  /// Triages incoming alerts: acknowledges receipt and assigns an
+  /// engineer. Deliberately separate from MANAGER, which means oversight
+  /// of the preventive programme and drives what oversees() unlocks.
+  HEAD_OF_ALERTS
 }
 
 enum Criticality {
@@ -68,6 +72,44 @@ enum MaintenanceType {
   CALIBRATION
   INSPECTION
   SAFETY_TEST
+}
+
+/// Shared by alerts and the work orders raised from them.
+enum Priority {
+  EMERGENCY
+  MEDIUM
+  LOW
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+/// The ladder a part climbs, plus the exit for one that turns out not to
+/// be needed. Without CANCELLED the only ways to retire a mistaken line
+/// would be deleting it — losing the record that it was ever ordered — or
+/// marking it installed, which is a lie.
+enum PartStatus {
+  REQUIRED
+  REQUESTED
+  ORDERED
+  RECEIVED
+  INSTALLED
+  CANCELLED
+}
+
+enum WorkOrderStatus {
+  INVESTIGATING
+  AWAITING_PARTS
+  IN_REPAIR
+  COMPLETED
+  CLOSED
+  CANCELLED
 }
 
 enum NotifyLevel {
@@ -108,6 +150,12 @@ model User {
   maintenanceLogged MaintenanceRecord[]
   notifications     Notification[]
   auditEntries      AuditLog[]
+
+  raisedAlerts       Alert[]     @relation("AlertRaiser")
+  acknowledgedAlerts Alert[]     @relation("AlertAcknowledger")
+  assignedAlerts     Alert[]     @relation("AlertAssignee")
+  workOrders         WorkOrder[] @relation("WorkOrderEngineer")
+  closedWorkOrders   WorkOrder[] @relation("WorkOrderCloser")
 
   @@index([role, isActive])
 }
@@ -223,6 +271,8 @@ model Equipment {
   maintenance   MaintenanceRecord[]
   dispatches    NotificationDispatch[]
   notifications Notification[]
+  alerts        Alert[]
+  workOrders    WorkOrder[]
 
   @@index([nextDueAt])
   @@index([departmentId, operationalStatus])
@@ -253,6 +303,10 @@ model MaintenanceRecord {
 
   createdAt DateTime @default(now())
 
+  /// Set when this record was written by closing a work order, which is
+  /// how corrective work reaches the device's history.
+  workOrder WorkOrder?
+
   @@index([equipmentId, completedOn])
 }
 
@@ -275,6 +329,8 @@ model Notification {
   recipient   User        @relation(fields: [recipientId], references: [id], onDelete: Cascade)
   equipmentId String?     @db.Uuid
   equipment   Equipment?  @relation(fields: [equipmentId], references: [id])
+  alertId     String?     @db.Uuid
+  alert       Alert?      @relation(fields: [alertId], references: [id], onDelete: Cascade)
   level       NotifyLevel
   title       String
   body        String
@@ -342,4 +398,123 @@ model SweepRun {
   error      String?
 
   @@index([trigger, startedAt])
+}
+
+// ----------------------------------------------- alerts and work orders
+
+/// A fault reported by ward staff.
+///
+/// The counterpart to the preventive programme: preventive work is
+/// scheduled, this is what happens when a device breaks between services.
+/// It always names a registered device, so a fault lands in that device's
+/// history rather than in a parallel universe of free-text labels.
+///
+/// `seq` is an autoincrement column and the display number (ALT-2026-000123)
+/// is derived from it in the API. A counted-rows or read-then-write scheme
+/// would hand two nurses the same number under load.
+model Alert {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  seq         Int         @unique @default(autoincrement())
+  equipmentId String      @db.Uuid
+  equipment   Equipment   @relation(fields: [equipmentId], references: [id])
+  raisedById  String      @db.Uuid
+  raisedBy    User        @relation("AlertRaiser", fields: [raisedById], references: [id])
+  description String
+  priority    Priority
+  status      AlertStatus @default(OPEN)
+
+  openedAt         DateTime  @default(now())
+  acknowledgedAt   DateTime?
+  acknowledgedById String?   @db.Uuid
+  acknowledgedBy   User?     @relation("AlertAcknowledger", fields: [acknowledgedById], references: [id])
+  assignedToId     String?   @db.Uuid
+  assignedTo       User?     @relation("AlertAssignee", fields: [assignedToId], references: [id])
+  assignedAt       DateTime?
+  resolvedAt       DateTime?
+  cancelledReason  String?
+
+  updatedAt DateTime @updatedAt
+
+  workOrder     WorkOrder?
+  notifications Notification[]
+
+  @@index([status, priority])
+  @@index([assignedToId, status])
+  @@index([equipmentId, openedAt])
+  @@index([raisedById, openedAt])
+}
+
+/// The engineering response to an alert: one per alert.
+///
+/// Its status drives the device's operationalStatus, which is what keeps
+/// the estate view honest — a device under repair says so on the
+/// equipment list without anyone remembering to set it.
+///
+/// Closing one writes a MaintenanceRecord of type CORRECTIVE. Because only
+/// PREVENTIVE work resets the schedule, a repair never buys the device
+/// another maintenance cycle.
+model WorkOrder {
+  id      String @id @default(uuid(7)) @db.Uuid
+  seq     Int    @unique @default(autoincrement())
+  alertId String @unique @db.Uuid
+  alert   Alert  @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  /// Denormalised from the alert so work-order queries index directly
+  /// rather than joining through it.
+  equipmentId String    @db.Uuid
+  equipment   Equipment @relation(fields: [equipmentId], references: [id])
+  engineerId  String    @db.Uuid
+  engineer    User      @relation("WorkOrderEngineer", fields: [engineerId], references: [id])
+
+  status   WorkOrderStatus @default(INVESTIGATING)
+  priority Priority
+
+  findings        String?
+  diagnosis       String?
+  repairActions   String?
+  finalResolution String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+  closedAt    DateTime?
+  closedById  String?   @db.Uuid
+  closedBy    User?     @relation("WorkOrderCloser", fields: [closedById], references: [id])
+
+  maintenanceRecordId String?            @unique @db.Uuid
+  maintenanceRecord   MaintenanceRecord? @relation(fields: [maintenanceRecordId], references: [id])
+
+  parts WorkOrderPart[]
+
+  @@index([status, priority])
+  @@index([engineerId, status])
+  @@index([equipmentId])
+}
+
+/// A part needed for a repair, and how far along it is.
+///
+/// A line item rather than a catalogue entry: this records what one job
+/// needed, not what the hospital stocks. Each step carries its own
+/// timestamp, because "ordered three weeks ago" is the question people
+/// actually ask of a stalled repair.
+model WorkOrderPart {
+  id          String     @id @default(uuid(7)) @db.Uuid
+  workOrderId String     @db.Uuid
+  workOrder   WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  name        String
+  partNumber  String?
+  quantity    Int        @default(1)
+  status      PartStatus @default(REQUIRED)
+  notes       String?
+
+  requestedAt DateTime?
+  orderedAt   DateTime?
+  receivedAt  DateTime?
+  installedAt DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workOrderId, status])
 }
