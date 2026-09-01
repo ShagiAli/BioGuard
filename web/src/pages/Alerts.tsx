@@ -8,11 +8,14 @@
  * Ordered by priority then age, so it reads as a work list rather than a
  * feed — the emergency raised an hour ago belongs above the low-priority
  * one from last week.
+ *
+ * Filters live in the URL, as they do on the equipment list, so every
+ * dashboard figure is a plain link to the alerts behind it and the two
+ * cannot disagree about what they are counting.
  */
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Siren } from "lucide-react";
+import { Siren, X } from "lucide-react";
 import {
   ALERT_STATUS_LABELS,
   alertStatusTone,
@@ -23,7 +26,6 @@ import {
   priorityTone,
   type Alert,
   type AlertStatus,
-  type Priority,
 } from "../lib/api";
 import { Badge, Card, Empty, ErrorNote, Pager, Spinner } from "../components/ui";
 
@@ -43,27 +45,60 @@ const STATUSES: AlertStatus[] = [
   "CANCELLED",
 ];
 
+const FILTER_LABELS: Record<string, string> = {
+  priority: "Priority",
+  status: "Status",
+  open: "Showing",
+};
+
+function labelFor(key: string, value: string) {
+  if (key === "priority") return PRIORITY_LABELS[value as never] ?? value;
+  if (key === "status") return ALERT_STATUS_LABELS[value as never] ?? value;
+  if (key === "open") return value === "true" ? "Unresolved only" : "All";
+  return value;
+}
+
 export function Alerts() {
-  const [status, setStatus] = useState("");
-  const [priority, setPriority] = useState("");
-  const [openOnly, setOpenOnly] = useState(true);
-  const [page, setPage] = useState(1);
+  const [params, setParams] = useSearchParams();
+
+  const page = Number(params.get("page") ?? 1);
+  const status = params.get("status") ?? "";
+  const priority = params.get("priority") ?? "";
+  // Unresolved by default: the queue is a work list, and yesterday's
+  // finished jobs are not work.
+  const openOnly = (params.get("open") ?? "true") === "true";
 
   const query = useQuery({
-    queryKey: ["alerts", status, priority, openOnly, page],
+    queryKey: ["alerts", params.toString()],
     queryFn: () => {
-      const params = new URLSearchParams({ page: String(page) });
-      if (status) params.set("status", status);
-      if (priority) params.set("priority", priority);
-      // "Open" and an explicit status are mutually exclusive filters.
-      if (openOnly && !status) params.set("open", "true");
-      return api.get<Feed>(`/api/alerts?${params}`);
+      const q = new URLSearchParams({ page: String(page) });
+      if (status) q.set("status", status);
+      if (priority) q.set("priority", priority);
+      // "Unresolved" and an explicit status are mutually exclusive.
+      if (openOnly && !status) q.set("open", "true");
+      return api.get<Feed>(`/api/alerts?${q}`);
     },
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
 
-  const reset = () => setPage(1);
+  /** Changing a filter returns to page 1; the old page rarely exists. */
+  const setFilter = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    next.delete("page");
+    setParams(next);
+  };
+
+  // Paging must not go through setFilter, which drops `page` by design.
+  const goToPage = (next: number) => {
+    const q = new URLSearchParams(params);
+    q.set("page", String(next));
+    setParams(q);
+  };
+
+  const active = [...params.entries()].filter(([k]) => k !== "page" && k !== "pageSize");
   const totalPages = query.data ? Math.ceil(query.data.total / query.data.pageSize) : 1;
 
   return (
@@ -76,10 +111,7 @@ export function Alerts() {
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <select
           value={priority}
-          onChange={(e) => {
-            setPriority(e.target.value);
-            reset();
-          }}
+          onChange={(e) => setFilter("priority", e.target.value)}
           className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
         >
           <option value="">All priorities</option>
@@ -92,10 +124,7 @@ export function Alerts() {
 
         <select
           value={status}
-          onChange={(e) => {
-            setStatus(e.target.value);
-            reset();
-          }}
+          onChange={(e) => setFilter("status", e.target.value)}
           className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
         >
           <option value="">Any status</option>
@@ -111,14 +140,34 @@ export function Alerts() {
             type="checkbox"
             checked={openOnly}
             disabled={status !== ""}
-            onChange={(e) => {
-              setOpenOnly(e.target.checked);
-              reset();
-            }}
+            onChange={(e) => setFilter("open", e.target.checked ? "" : "false")}
           />
           Unresolved only
         </label>
       </div>
+
+      {active.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-slate-400">Filtered by</span>
+          {active.map(([key, value]) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key, "")}
+              className="flex cursor-pointer items-center gap-1.5 rounded border border-teal-200 bg-teal-50 px-2 py-1 text-xs text-teal-900 transition hover:border-teal-400 hover:bg-teal-100"
+            >
+              <span className="text-teal-600">{FILTER_LABELS[key] ?? key}:</span>
+              {labelFor(key, value)}
+              <X size={12} />
+            </button>
+          ))}
+          <button
+            onClick={() => setParams(new URLSearchParams())}
+            className="cursor-pointer text-xs text-slate-500 underline hover:text-slate-800"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
 
       <Card className="mt-4">
         {query.isLoading ? (
@@ -173,13 +222,8 @@ export function Alerts() {
           </ul>
         )}
 
-        {query.data && <Pager page={page} totalPages={totalPages} onChange={setPage} />}
+        {query.data && <Pager page={page} totalPages={totalPages} onChange={goToPage} />}
       </Card>
     </div>
   );
-}
-
-/** Shared by the list and the device page, so a priority always reads the same. */
-export function PriorityBadge({ priority }: { priority: Priority }) {
-  return <Badge tone={priorityTone(priority)}>{PRIORITY_LABELS[priority]}</Badge>;
 }

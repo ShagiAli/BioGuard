@@ -93,14 +93,28 @@ export function requireRole(...roles: Role[]) {
  * route.
  */
 export function equipmentScope(user: SessionUser) {
-  if (user.role === "ADMIN" || user.role === "MANAGER") return {};
+  // Estate-wide roles. HEAD_OF_ALERTS belongs here because triage is
+  // hospital-wide: faults arrive from every ward, and somebody who
+  // cannot see the device an alert names cannot judge it. Without this
+  // they fall to the department branch below, hold no department, and
+  // silently see nothing at all.
+  if (user.role === "ADMIN" || user.role === "MANAGER" || user.role === "HEAD_OF_ALERTS") {
+    return {};
+  }
   if (!user.departmentId) return { id: "00000000-0000-0000-0000-000000000000" }; // matches nothing
   return { departmentId: user.departmentId };
 }
 
 /** Fields a ward-staff caller is allowed to see. Costs are not among them. */
 export function canSeeCosts(user: SessionUser): boolean {
-  return user.role === "ADMIN" || user.role === "ENGINEER" || user.role === "MANAGER";
+  return (
+    user.role === "ADMIN" ||
+    user.role === "ENGINEER" ||
+    user.role === "MANAGER" ||
+    // Triage weighs a repair against replacing the device, which needs
+    // the figures. Ward staff remain the only role without them.
+    user.role === "HEAD_OF_ALERTS"
+  );
 }
 
 /**

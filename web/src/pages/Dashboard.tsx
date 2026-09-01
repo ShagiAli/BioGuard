@@ -5,8 +5,10 @@ import {
   api,
   daysUntil,
   formatDate,
+  type AlertSummary,
   type EquipmentRow,
   type Summary,
+  type WorkOrderSummary,
 } from "../lib/api";
 import { Badge, Card, ErrorNote, Spinner, pmTone } from "../components/ui";
 
@@ -22,6 +24,20 @@ export function Dashboard() {
     queryKey: ["attention"],
     queryFn: () =>
       api.get<{ rows: EquipmentRow[] }>("/api/equipment?pm=DUE_30&pageSize=8"),
+  });
+
+  // The corrective side. Scoped on the server exactly as the lists are,
+  // so each figure opens the rows it counted.
+  const alerts = useQuery({
+    queryKey: ["alerts", "summary"],
+    queryFn: () => api.get<AlertSummary>("/api/alerts/summary"),
+    refetchInterval: 60_000,
+  });
+
+  const work = useQuery({
+    queryKey: ["work-orders", "summary"],
+    queryFn: () => api.get<WorkOrderSummary>("/api/work-orders/summary"),
+    refetchInterval: 60_000,
   });
 
   if (summary.isLoading) return <Spinner label="Loading the maintenance position" />;
@@ -42,6 +58,34 @@ export function Dashboard() {
       query: "?pm=OVERDUE&criticality=CRITICAL",
       tone: "rose",
     },
+  ];
+
+  const a = alerts.data;
+  const w = work.data;
+
+  /** Every figure links to the list filtered by the predicate behind it. */
+  const alertCards = a && [
+    { label: "Emergency", value: a.emergency, to: "/alerts?priority=EMERGENCY", tone: "rose" },
+    { label: "Medium", value: a.medium, to: "/alerts?priority=MEDIUM", tone: "amber" },
+    { label: "Low", value: a.low, to: "/alerts?priority=LOW" },
+    {
+      label: "Waiting for assignment",
+      value: a.awaitingAssignment,
+      to: "/alerts?status=OPEN",
+      tone: a.awaitingAssignment > 0 ? "amber" : undefined,
+    },
+  ];
+
+  const workCards = w && [
+    { label: "Work orders in progress", value: w.inProgress, to: "/work-orders" },
+    {
+      label: "Awaiting parts",
+      value: w.awaitingParts,
+      to: "/work-orders",
+      tone: w.awaitingParts > 0 ? "amber" : undefined,
+    },
+    { label: "Parts on order", value: w.partsOrdered, to: "/work-orders" },
+    { label: "Closed work orders", value: w.closed, to: "/work-orders?archived=true" },
   ];
 
   return (
@@ -97,6 +141,40 @@ export function Dashboard() {
         </div>
       )}
 
+      {a && a.open > 0 && (
+        <section className="mt-6">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-medium text-slate-800">
+              Reported faults ({a.open} unresolved)
+            </h2>
+            <Link to="/alerts" className="text-xs text-teal-700 hover:text-teal-900">
+              All alerts
+            </Link>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {alertCards!.map((c) => (
+              <FigureCard key={c.label} {...c} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {w && (w.inProgress > 0 || w.closed > 0) && (
+        <section className="mt-5">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-medium text-slate-800">Repairs</h2>
+            <Link to="/work-orders" className="text-xs text-teal-700 hover:text-teal-900">
+              All work orders
+            </Link>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {workCards!.map((c) => (
+              <FigureCard key={c.label} {...c} />
+            ))}
+          </div>
+        </section>
+      )}
+
       <Card className="mt-5">
         <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <h2 className="text-sm font-medium text-slate-800">Due within 30 days</h2>
@@ -146,5 +224,42 @@ export function Dashboard() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * One clickable figure.
+ *
+ * A link rather than a button, so it can be opened in a new tab and
+ * copied — the same reason the equipment filters live in the URL.
+ */
+function FigureCard({
+  label,
+  value,
+  to,
+  tone,
+}: {
+  label: string;
+  value: number;
+  to: string;
+  tone?: string;
+}) {
+  return (
+    <Link
+      to={to}
+      className="group rounded-lg border border-slate-200 bg-white p-4 transition hover:border-teal-400 hover:bg-slate-100"
+    >
+      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-2 flex items-baseline justify-between">
+        <span
+          className={`font-mono text-3xl ${
+            tone === "rose" ? "text-rose-600" : tone === "amber" ? "text-amber-600" : "text-slate-900"
+          }`}
+        >
+          {value}
+        </span>
+        <ChevronRight size={15} className="text-slate-300 group-hover:text-teal-600" />
+      </div>
+    </Link>
   );
 }

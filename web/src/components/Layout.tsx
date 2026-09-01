@@ -8,6 +8,7 @@ import {
   Clock,
   History,
   Siren,
+  Wrench,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -60,6 +61,7 @@ export function Layout({ children }: { children: ReactNode }) {
     // Unlike Activity, this is not gated: every role has a stake in
     // alerts, and the API decides which ones each of them can see.
     { to: "/alerts", label: "Alerts", icon: Siren, end: false, count: alerts.data?.open },
+    { to: "/work-orders", label: "Work orders", icon: Wrench, end: false, count: undefined },
     ...(oversees
       ? [{ to: "/activity", label: "Activity", icon: History, end: false, count: undefined }]
       : []),

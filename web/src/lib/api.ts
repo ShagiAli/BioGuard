@@ -470,6 +470,13 @@ export function isPartOutstanding(status: PartStatus): boolean {
   return status !== "INSTALLED" && status !== "CANCELLED";
 }
 
+export interface WorkOrderSummary {
+  inProgress: number;
+  awaitingParts: number;
+  partsOrdered: number;
+  closed: number;
+}
+
 export interface AlertSummary {
   open: number;
   emergency: number;

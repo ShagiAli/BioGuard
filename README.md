@@ -85,6 +85,8 @@ server/
   src/modules/       auth · equipment · maintenance · admin
                      notifications · mail · audit
                      alerts · work-orders
+web/ pages           dashboard · equipment · alerts · work orders
+                     notifications · mail · activity · public scan
   src/scheduler/
       rules.ts       pure scheduling logic, no I/O
       job.ts         pg-boss wiring for the nightly sweep
@@ -153,6 +155,14 @@ buys the device another maintenance cycle. Work-order status also drives
 `operationalStatus`, so a device under repair says so on the equipment
 list without anyone remembering to set it.
 
+**Every dashboard figure opens the rows it counted.** The corrective
+figures follow the same rule as the preventive ones: each is a link to
+the list filtered by the predicate the count came from, and both are
+scoped identically on the server. A count produced by a different
+predicate from the list behind it is worse than no count, because it
+looks authoritative and disagrees. The archive is that same work-order
+list with one filter, not a second screen reading a second table.
+
 **A part climbs its ladder one rung at a time.** Required, requested,
 ordered, received, installed — each with its own timestamp, because "when
 did we order it?" is the question a stalled repair always raises. Skipping
@@ -201,7 +211,7 @@ reminder ladder firing on its rungs and staying silent between them,
 calendar arithmetic across DST boundaries, and the guard that decides
 which database the integration suite may destroy.
 
-**61 integration tests** run against a real database rather than mocks,
+**71 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would
 verify nothing. They assert properties, not just outputs:
 

@@ -1199,3 +1199,174 @@ describe("parts", () => {
       .expect(403);
   });
 });
+
+describe("dashboard figures", () => {
+  /**
+   * Each figure must equal the list it links to. A count produced by a
+   * different predicate from the list behind it is worse than no count:
+   * it looks authoritative and disagrees.
+   */
+  async function countFromList(path: string, cookie: string[]) {
+    const res = await request(app).get(path).set("Cookie", cookie).expect(200);
+    return res.body.total as number;
+  }
+
+  it("agrees with the alert list it links to, priority by priority", async () => {
+    const nurse = await login(seeded.nurseEmail);
+    for (const priority of ["EMERGENCY", "MEDIUM", "LOW"]) {
+      await request(app)
+        .post("/api/alerts")
+        .set("Cookie", nurse)
+        .send({ equipmentId: seeded.ownDeviceId, description: `A ${priority} fault.`, priority })
+        .expect(201);
+    }
+
+    const cookie = await login(seeded.adminEmail);
+    const summary = await request(app).get("/api/alerts/summary").set("Cookie", cookie).expect(200);
+
+    expect(summary.body.emergency).toBe(
+      await countFromList("/api/alerts?priority=EMERGENCY&open=true", cookie)
+    );
+    expect(summary.body.medium).toBe(
+      await countFromList("/api/alerts?priority=MEDIUM&open=true", cookie)
+    );
+    expect(summary.body.low).toBe(
+      await countFromList("/api/alerts?priority=LOW&open=true", cookie)
+    );
+  });
+
+  it("counts what is waiting for somebody to pick it up", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const summary = await request(app).get("/api/alerts/summary").set("Cookie", cookie).expect(200);
+    const open = await countFromList("/api/alerts?status=OPEN", cookie);
+    const acknowledged = await countFromList("/api/alerts?status=ACKNOWLEDGED", cookie);
+    // Waiting for assignment means raised or received, but not yet given
+    // to an engineer.
+    expect(summary.body.awaitingAssignment).toBe(open + acknowledged);
+  });
+
+  it("scopes every figure to the viewer, like the lists", async () => {
+    // The theatre engineer sees neither the ICU alerts nor their counts.
+    const cookie = await login(seeded.otherEngineerEmail);
+    const summary = await request(app).get("/api/alerts/summary").set("Cookie", cookie).expect(200);
+    expect(summary.body.open).toBe(await countFromList("/api/alerts?open=true", cookie));
+  });
+
+  it("counts parts actually on order, not work orders that mention parts", async () => {
+    const nurse = await login(seeded.nurseEmail);
+    const alert = await request(app)
+      .post("/api/alerts")
+      .set("Cookie", nurse)
+      .send({ equipmentId: seeded.ownDeviceId, description: "Needs parts.", priority: "LOW" })
+      .expect(201);
+
+    const head = await login(seeded.headEmail);
+    await request(app).post(`/api/alerts/${alert.body.id}/acknowledge`).set("Cookie", head);
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    await request(app)
+      .post(`/api/alerts/${alert.body.id}/assign`)
+      .set("Cookie", head)
+      .send({ engineerId: engineer.id });
+
+    const eng = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", eng)
+      .send({ alertId: alert.body.id })
+      .expect(201);
+
+    const admin = await login(seeded.adminEmail);
+    const before = await request(app)
+      .get("/api/work-orders/summary")
+      .set("Cookie", admin)
+      .expect(200);
+
+    // Two parts on one work order count as two, not one.
+    for (const name of ["Sensor", "Gasket"]) {
+      const part = await request(app)
+        .post(`/api/work-orders/${wo.body.id}/parts`)
+        .set("Cookie", eng)
+        .send({ name })
+        .expect(201);
+      for (const status of ["REQUESTED", "ORDERED"]) {
+        await request(app)
+          .patch(`/api/work-orders/${wo.body.id}/parts/${part.body.id}`)
+          .set("Cookie", eng)
+          .send({ status });
+      }
+    }
+
+    const after = await request(app)
+      .get("/api/work-orders/summary")
+      .set("Cookie", admin)
+      .expect(200);
+    expect(after.body.partsOrdered).toBe(before.body.partsOrdered + 2);
+  });
+
+  it("agrees with the archive it links to", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const summary = await request(app)
+      .get("/api/work-orders/summary")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(summary.body.closed).toBe(await countFromList("/api/work-orders?archived=true", cookie));
+  });
+
+  it("keeps the summary out of an unauthenticated caller's hands", async () => {
+    await request(app).get("/api/alerts/summary").expect(401);
+    await request(app).get("/api/work-orders/summary").expect(401);
+  });
+
+  it('does not mistake "summary" for a work order id', async () => {
+    const cookie = await login(seeded.adminEmail);
+    // Route order matters: /:id would otherwise swallow it and 404.
+    await request(app).get("/api/work-orders/summary").set("Cookie", cookie).expect(200);
+  });
+});
+
+describe("a new role must not silently see nothing", () => {
+  /**
+   * equipmentScope falls through to a "matches nothing" filter for any
+   * role without a department. Adding HEAD_OF_ALERTS inherited that by
+   * default, and the estate read as empty for the person triaging it —
+   * which is exactly the kind of thing a type checker cannot notice.
+   */
+  it("shows the head of alerts the whole estate", async () => {
+    const cookie = await login(seeded.headEmail);
+    const res = await request(app).get("/api/equipment").set("Cookie", cookie).expect(200);
+    expect(res.body.total).toBe(2);
+
+    const summary = await request(app)
+      .get("/api/equipment/summary")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(summary.body.total).toBe(2);
+  });
+
+  it("still shows an engineer only their department", async () => {
+    const cookie = await login(seeded.engineerEmail);
+    const res = await request(app).get("/api/equipment").set("Cookie", cookie).expect(200);
+    expect(res.body.total).toBe(1);
+  });
+
+  it("gives the head of alerts costs, and ward staff none", async () => {
+    // Triage weighs repairing against replacing, which needs the figures.
+    const head = await login(seeded.headEmail);
+    const withCosts = await request(app)
+      .get(`/api/equipment/${seeded.ownDeviceId}`)
+      .set("Cookie", head)
+      .expect(200);
+    if (withCosts.body.maintenance.length > 0) {
+      expect(withCosts.body.maintenance[0]).toHaveProperty("cost");
+    }
+
+    const nurse = await login(seeded.nurseEmail);
+    const without = await request(app)
+      .get(`/api/equipment/${seeded.ownDeviceId}`)
+      .set("Cookie", nurse)
+      .expect(200);
+    for (const record of without.body.maintenance) {
+      expect(record).not.toHaveProperty("cost");
+    }
+  });
+});

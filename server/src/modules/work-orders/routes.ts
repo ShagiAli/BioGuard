@@ -192,6 +192,32 @@ workOrdersRouter.get("/", requireAuth, async (req, res) => {
   res.json({ total, page, pageSize, rows: rows.map(present) });
 });
 
+/**
+ * Counts for the dashboard.
+ *
+ * Declared before /:id so "summary" is never read as an identifier, and
+ * scoped exactly like the list below — a figure and the list behind it
+ * are produced by the same predicate, so they cannot disagree.
+ */
+workOrdersRouter.get("/summary", requireAuth, async (req, res) => {
+  const scope = scoped(req.user!);
+
+  const [inProgress, awaitingParts, partsOrdered, closed] = await Promise.all([
+    prisma.workOrder.count({
+      where: { ...scope, status: { notIn: ["CLOSED", "CANCELLED"] } },
+    }),
+    prisma.workOrder.count({ where: { ...scope, status: "AWAITING_PARTS" } }),
+    // Parts actually on order, rather than work orders that mention parts:
+    // "three parts ordered" is the number a manager is chasing.
+    prisma.workOrderPart.count({
+      where: { status: "ORDERED", workOrder: scope },
+    }),
+    prisma.workOrder.count({ where: { ...scope, status: "CLOSED" } }),
+  ]);
+
+  res.json({ inProgress, awaitingParts, partsOrdered, closed });
+});
+
 workOrdersRouter.get("/:id", requireAuth, async (req, res) => {
   const id = z.uuid().safeParse(req.params.id);
   if (!id.success) return res.status(404).json({ error: "Work order not found." });
