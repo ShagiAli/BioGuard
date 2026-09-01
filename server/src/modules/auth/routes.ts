@@ -65,6 +65,7 @@ function setSessionCookie(res: import("express").Response, token: string) {
     httpOnly: true,
     secure: isProd,
     sameSite: "strict", // primary CSRF defence for a cookie session
+    signed: true, // verified in loadSession before any query runs
     path: "/",
     maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000,
   });
@@ -158,7 +159,7 @@ authRouter.post("/logout", requireAuth, async (req, res) => {
       data: { revokedAt: new Date() },
     });
   }
-  res.clearCookie(SESSION_COOKIE, { path: "/" });
+  res.clearCookie(SESSION_COOKIE, { path: "/", signed: true });
   res.status(204).end();
 });
 

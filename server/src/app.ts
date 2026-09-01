@@ -60,7 +60,11 @@ export function createApp() {
   // Access-Control-Allow-Origin at all is stricter than an allowlist —
   // the browser refuses every cross-origin read by default.
   app.use(express.json({ limit: "100kb" }));
-  app.use(cookieParser());
+  // Signed with SESSION_SECRET, which until now was validated at boot
+  // and then never used — a control that existed only in the
+  // documentation. A forged or mangled cookie is now rejected here,
+  // before it reaches a database lookup.
+  app.use(cookieParser(env.SESSION_SECRET));
 
   // Request logging is noise in a test run.
   if (env.NODE_ENV !== "test") {

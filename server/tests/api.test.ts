@@ -1370,3 +1370,125 @@ describe("a new role must not silently see nothing", () => {
     }
   });
 });
+
+describe("hardening", () => {
+  it("rejects a session cookie whose signature does not verify", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const raw = cookie[0]!;
+
+    // A valid signed cookie looks like bg_session=s%3A<token>.<signature>.
+    // Flip a character in the signature and the value must be refused
+    // before any session lookup happens.
+    const tampered = raw.replace(/\.([^.;]+)(;|$)/, (_m, sig, tail) => {
+      const flipped = sig[0] === "A" ? "B" + sig.slice(1) : "A" + sig.slice(1);
+      return `.${flipped}${tail}`;
+    });
+    expect(tampered).not.toBe(raw);
+
+    await request(app).get("/api/auth/me").set("Cookie", [tampered]).expect(401);
+    // And the untouched one still works, so the test is not passing by
+    // breaking the cookie in some other way.
+    await request(app).get("/api/auth/me").set("Cookie", cookie).expect(200);
+  });
+
+  it("refuses a status filter and the unresolved filter together", async () => {
+    const cookie = await login(seeded.adminEmail);
+    // They both write `status`, so one used to overwrite the other and the
+    // caller silently got a filter they had not asked for.
+    const res = await request(app)
+      .get("/api/alerts?status=RESOLVED&open=true")
+      .set("Cookie", cookie)
+      .expect(400);
+    expect(res.body.error).toMatch(/not both/);
+
+    // Either alone is still fine.
+    await request(app).get("/api/alerts?status=RESOLVED").set("Cookie", cookie).expect(200);
+    await request(app).get("/api/alerts?open=true").set("Cookie", cookie).expect(200);
+  });
+
+  it("audits a part as itself, not as an edit to the work order", async () => {
+    const nurse = await login(seeded.nurseEmail);
+    const alert = await request(app)
+      .post("/api/alerts")
+      .set("Cookie", nurse)
+      .send({ equipmentId: seeded.ownDeviceId, description: "Audit check.", priority: "LOW" })
+      .expect(201);
+
+    const head = await login(seeded.headEmail);
+    await request(app).post(`/api/alerts/${alert.body.id}/acknowledge`).set("Cookie", head);
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    await request(app)
+      .post(`/api/alerts/${alert.body.id}/assign`)
+      .set("Cookie", head)
+      .send({ engineerId: engineer.id });
+
+    const eng = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", eng)
+      .send({ alertId: alert.body.id })
+      .expect(201);
+
+    const part = await request(app)
+      .post(`/api/work-orders/${wo.body.id}/parts`)
+      .set("Cookie", eng)
+      .send({ name: "Filter cartridge", quantity: 3 })
+      .expect(201);
+
+    const entry = await prisma.auditLog.findFirstOrThrow({
+      where: { entity: "WorkOrderPart", entityId: part.body.id },
+    });
+    const after = entry.after as Record<string, unknown>;
+    expect(after.name).toBe("Filter cartridge");
+    expect(after.quantity).toBe(3);
+    // The old version wrote a sentence into the work order's findings,
+    // so the feed claimed the engineer had rewritten their notes.
+    expect(after).not.toHaveProperty("findings");
+
+    const onWorkOrder = await prisma.auditLog.findMany({
+      where: { entity: "WorkOrder", entityId: wo.body.id },
+    });
+    const findingsWritten = onWorkOrder
+      .map((row) => (row.after as Record<string, unknown> | null)?.findings)
+      .filter((value): value is string => typeof value === "string");
+    expect(findingsWritten.join(" ")).not.toMatch(/Filter cartridge/);
+
+    // The part still appears in the alert's timeline, which is the point
+    // of recording it at all.
+    const timeline = await request(app)
+      .get(`/api/alerts/${alert.body.id}/audit`)
+      .set("Cookie", eng)
+      .expect(200);
+    expect(timeline.body.rows.some((r: { entity: string }) => r.entity === "WorkOrderPart")).toBe(
+      true
+    );
+  });
+
+  it("lets only one of two simultaneous acknowledgements win", async () => {
+    const nurse = await login(seeded.nurseEmail);
+    const alert = await request(app)
+      .post("/api/alerts")
+      .set("Cookie", nurse)
+      .send({ equipmentId: seeded.ownDeviceId, description: "Race check.", priority: "LOW" })
+      .expect(201);
+
+    const head = await login(seeded.headEmail);
+    const admin = await login(seeded.adminEmail);
+
+    // Both read OPEN, both pass the workflow check, both try to write.
+    // The guarded update means the loser is told, not silently ignored.
+    const [a, b] = await Promise.all([
+      request(app).post(`/api/alerts/${alert.body.id}/acknowledge`).set("Cookie", head),
+      request(app).post(`/api/alerts/${alert.body.id}/acknowledge`).set("Cookie", admin),
+    ]);
+
+    const codes = [a.status, b.status].sort();
+    expect(codes[0]).toBe(200);
+    expect(codes[1]).toBeGreaterThanOrEqual(409);
+
+    // And exactly one acknowledgement was recorded.
+    const stored = await prisma.alert.findUniqueOrThrow({ where: { id: alert.body.id } });
+    expect(stored.status).toBe("ACKNOWLEDGED");
+    expect(stored.acknowledgedById).not.toBeNull();
+  });
+});

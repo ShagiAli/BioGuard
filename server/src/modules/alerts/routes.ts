@@ -144,11 +144,21 @@ const listQuery = z
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
   })
-  .strict();
+  .strict()
+  // Both write `status` into the same where clause, so one silently
+  // overwrote the other and the caller got a filter they did not ask
+  // for. Saying no is better than choosing for them.
+  .refine((q) => !(q.status && q.open === "true"), {
+    message: "Use either a status or the unresolved filter, not both.",
+  });
 
 alertsRouter.get("/", requireAuth, async (req, res) => {
   const parsed = listQuery.safeParse(req.query);
-  if (!parsed.success) return res.status(400).json({ error: "Unrecognised filter." });
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: parsed.error.issues[0]?.message ?? "Unrecognised filter." });
+  }
 
   const { status, priority, open, page, pageSize } = parsed.data;
 
@@ -217,10 +227,18 @@ alertsRouter.get("/:id/audit", requireAuth, async (req, res) => {
   const alert = await findScoped(req, id.data);
   if (!alert) return res.status(404).json({ error: "Alert not found." });
 
+  // The alert, its work order, and every part on it — the whole story
+  // in one timeline rather than three places to look.
+  const subjects = [
+    alert.id,
+    ...(alert.workOrder ? [alert.workOrder.id] : []),
+    ...(alert.workOrder?.parts.map((part) => part.id) ?? []),
+  ];
+
   const rows = await prisma.auditLog.findMany({
     where: {
-      entity: { in: ["Alert", "WorkOrder"] },
-      entityId: { in: [alert.id, alert.workOrder?.id ?? alert.id] },
+      entity: { in: ["Alert", "WorkOrder", "WorkOrderPart"] },
+      entityId: { in: subjects },
     },
     orderBy: { createdAt: "desc" },
     take: 100,
@@ -240,7 +258,7 @@ async function transition(
   req: Parameters<typeof requireAuth>[0],
   res: Parameters<typeof requireAuth>[1],
   action: "acknowledge" | "assign" | "cancel",
-  apply: (alertId: string) => Promise<unknown>
+  apply: (alertId: string, from: AlertStatus) => Promise<unknown>
 ) {
   const id = z.uuid().safeParse(req.params.id);
   if (!id.success) return res.status(404).json({ error: "Alert not found." });
@@ -256,21 +274,40 @@ async function transition(
     return res.status(status).json({ error: check.reason });
   }
 
-  return apply(before.id);
+  // The status just checked is handed to the caller, which writes with it
+  // in the where clause. Between this read and that write another request
+  // can move the alert, and two people acknowledging at once would both
+  // pass the check above.
+  return apply(before.id, before.status);
 }
 
+/**
+ * Applies a transition only if the alert is still where we left it.
+ *
+ * Returns null when somebody else got there first, which the caller
+ * reports as a conflict rather than silently overwriting their work.
+ */
+async function guardedUpdate(
+  id: string,
+  from: AlertStatus,
+  data: Parameters<typeof prisma.alert.updateMany>[0]["data"]
+) {
+  const { count } = await prisma.alert.updateMany({ where: { id, status: from }, data });
+  if (count === 0) return null;
+  return prisma.alert.findUniqueOrThrow({ where: { id }, include: DETAIL_INCLUDE });
+}
+
+const RACED = "That alert was updated by somebody else. Reload it and try again.";
+
 alertsRouter.post("/:id/acknowledge", requireAuth, async (req, res) => {
-  await transition(req, res, "acknowledge", async (alertId) => {
+  await transition(req, res, "acknowledge", async (alertId, from) => {
     const before = await prisma.alert.findUniqueOrThrow({ where: { id: alertId } });
-    const alert = await prisma.alert.update({
-      where: { id: alertId },
-      data: {
-        status: "ACKNOWLEDGED",
-        acknowledgedAt: new Date(),
-        acknowledgedById: req.user!.id,
-      },
-      include: DETAIL_INCLUDE,
+    const alert = await guardedUpdate(alertId, from, {
+      status: "ACKNOWLEDGED",
+      acknowledgedAt: new Date(),
+      acknowledgedById: req.user!.id,
     });
+    if (!alert) return res.status(409).json({ error: RACED });
 
     await recordAudit({
       actorId: req.user!.id,
@@ -292,7 +329,7 @@ alertsRouter.post("/:id/assign", requireAuth, async (req, res) => {
   const parsed = assignSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Choose an engineer." });
 
-  await transition(req, res, "assign", async (alertId) => {
+  await transition(req, res, "assign", async (alertId, from) => {
     const engineer = await prisma.user.findFirst({
       where: { id: parsed.data.engineerId, role: "ENGINEER", isActive: true },
       select: { id: true, fullName: true },
@@ -304,11 +341,12 @@ alertsRouter.post("/:id/assign", requireAuth, async (req, res) => {
     }
 
     const before = await prisma.alert.findUniqueOrThrow({ where: { id: alertId } });
-    const alert = await prisma.alert.update({
-      where: { id: alertId },
-      data: { status: "ASSIGNED", assignedToId: engineer.id, assignedAt: new Date() },
-      include: DETAIL_INCLUDE,
+    const alert = await guardedUpdate(alertId, from, {
+      status: "ASSIGNED",
+      assignedToId: engineer.id,
+      assignedAt: new Date(),
     });
+    if (!alert) return res.status(409).json({ error: RACED });
 
     await recordAudit({
       actorId: req.user!.id,
@@ -330,17 +368,14 @@ alertsRouter.post("/:id/cancel", requireAuth, async (req, res) => {
   const parsed = cancelSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Give a reason for cancelling." });
 
-  await transition(req, res, "cancel", async (alertId) => {
+  await transition(req, res, "cancel", async (alertId, from) => {
     const before = await prisma.alert.findUniqueOrThrow({ where: { id: alertId } });
-    const alert = await prisma.alert.update({
-      where: { id: alertId },
-      data: {
-        status: "CANCELLED",
-        cancelledReason: parsed.data.reason,
-        resolvedAt: new Date(),
-      },
-      include: DETAIL_INCLUDE,
+    const alert = await guardedUpdate(alertId, from, {
+      status: "CANCELLED",
+      cancelledReason: parsed.data.reason,
+      resolvedAt: new Date(),
     });
+    if (!alert) return res.status(409).json({ error: RACED });
 
     await recordAudit({
       actorId: req.user!.id,

@@ -504,13 +504,16 @@ workOrdersRouter.post(
       },
     });
 
+    // Audited as itself. Writing this against the work order meant
+    // smuggling a sentence into its `findings`, which then read back
+    // as though an engineer had edited their notes. Misleading
+    // history is worse than none.
     await recordAudit({
       actorId: req.user!.id,
-      action: "workorder.part_added",
-      entity: "WorkOrder",
-      entityId: wo.id,
-      before: { status: wo.status },
-      after: { status: wo.status, findings: `Part required: ${part.name} x${part.quantity}` },
+      action: "workorderpart.added",
+      entity: "WorkOrderPart",
+      entityId: part.id,
+      after: part,
     });
 
     res.status(201).json(part);
@@ -566,11 +569,11 @@ workOrdersRouter.patch(
     if (status && status !== part.status) {
       await recordAudit({
         actorId: req.user!.id,
-        action: "workorder.part_" + status.toLowerCase(),
-        entity: "WorkOrder",
-        entityId: wo.id,
-        before: { status: wo.status, findings: `${part.name}: ${part.status}` },
-        after: { status: wo.status, findings: `${part.name}: ${status}` },
+        action: "workorderpart." + status.toLowerCase(),
+        entity: "WorkOrderPart",
+        entityId: part.id,
+        before: part,
+        after: updated,
       });
     }
 

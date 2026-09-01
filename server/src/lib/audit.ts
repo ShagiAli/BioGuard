@@ -36,6 +36,7 @@ const ALLOWED_FIELDS: Record<string, readonly string[]> = {
     "finalResolution",
     "closedById",
   ],
+  WorkOrderPart: ["name", "partNumber", "quantity", "status"],
 };
 
 function pick(entity: string, source?: Record<string, unknown> | null) {

@@ -40,7 +40,10 @@ declare global {
  * `requireAuth`'s job — so public routes can still know who is calling.
  */
 export async function loadSession(req: Request, _res: Response, next: NextFunction) {
-  const raw = req.cookies?.[SESSION_COOKIE];
+  // signedCookies, not cookies: express puts `false` here when the
+  // signature does not verify, so a tampered value never reaches the
+  // session lookup.
+  const raw = req.signedCookies?.[SESSION_COOKIE];
   if (!raw || typeof raw !== "string") return next();
 
   const session = await prisma.session.findUnique({
