@@ -19,10 +19,13 @@ import { recordAudit } from "../../lib/audit.js";
 import { alertScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import {
   canEditWorkOrder,
+  canMovePart,
   canMoveWorkOrder,
   canTransitionAlert,
   deviceStatusFor,
   maintenanceTypeFor,
+  PART_TIMESTAMP,
+  partsSettled,
   workOrderNumber,
 } from "../alerts/workflow.js";
 import { notifyResolved } from "../alerts/notify.js";
@@ -46,6 +49,9 @@ const DETAIL_INCLUDE = {
   },
   engineer: { select: { id: true, fullName: true } },
   closedBy: { select: { id: true, fullName: true } },
+  // Oldest first, so the list reads as the order the engineer decided
+  // each part was needed.
+  parts: { orderBy: { createdAt: "asc" } },
 } as const;
 
 function present<T extends { seq: number; createdAt: Date }>(wo: T) {
@@ -323,6 +329,11 @@ workOrdersRouter.post(
       });
     }
 
+    // A device must not go back to the ward while a part is still on
+    // order. This is the check the whole parts ladder exists to enable.
+    const parts = partsSettled(before.parts.map((part) => part.status));
+    if (!parts.ok) return res.status(409).json({ error: parts.reason });
+
     const closedAt = new Date();
 
     const closed = await prisma.$transaction(async (tx) => {
@@ -389,5 +400,187 @@ workOrdersRouter.post(
     await notifyResolved(alert, parsed.data.finalResolution);
 
     res.json(present(closed));
+  }
+);
+
+// -------------------------------------------------------------- parts
+
+/**
+ * Loads a work order the caller may change, or answers for itself.
+ *
+ * Every parts route needs the same three questions settled: is it
+ * visible, does it belong to this engineer, is it still open. Asking them
+ * once here keeps the four handlers below to their actual subject.
+ */
+async function editableWorkOrder(
+  req: Parameters<typeof requireAuth>[0],
+  res: Parameters<typeof requireAuth>[1],
+  id: string
+) {
+  const wo = await prisma.workOrder.findFirst({
+    where: { id, ...scoped(req.user!) },
+    include: DETAIL_INCLUDE,
+  });
+  if (!wo) {
+    res.status(404).json({ error: "Work order not found." });
+    return null;
+  }
+
+  const editable = canEditWorkOrder(wo.status, req.user!.role);
+  if (!editable.ok) {
+    res.status(403).json({ error: editable.reason });
+    return null;
+  }
+
+  if (req.user!.role === "ENGINEER" && wo.engineerId !== req.user!.id) {
+    res.status(403).json({ error: "This work order belongs to another engineer." });
+    return null;
+  }
+
+  return wo;
+}
+
+const addPartSchema = z
+  .object({
+    name: z.string().min(1, "Name the part.").max(200),
+    partNumber: z.string().max(100).optional(),
+    quantity: z.coerce.number().int().min(1).max(999).default(1),
+    notes: z.string().max(1000).optional(),
+  })
+  .strict();
+
+workOrdersRouter.post(
+  "/:id/parts",
+  requireAuth,
+  requireRole("ENGINEER", "ADMIN"),
+  async (req, res) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) return res.status(404).json({ error: "Work order not found." });
+
+    const parsed = addPartSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Check the part details.",
+        issues: parsed.error.issues.map((i) => ({ field: i.path.join("."), message: i.message })),
+      });
+    }
+
+    const wo = await editableWorkOrder(req, res, id.data);
+    if (!wo) return;
+
+    const part = await prisma.workOrderPart.create({
+      data: {
+        workOrderId: wo.id,
+        name: parsed.data.name,
+        partNumber: parsed.data.partNumber ?? null,
+        quantity: parsed.data.quantity,
+        notes: parsed.data.notes ?? null,
+      },
+    });
+
+    await recordAudit({
+      actorId: req.user!.id,
+      action: "workorder.part_added",
+      entity: "WorkOrder",
+      entityId: wo.id,
+      before: { status: wo.status },
+      after: { status: wo.status, findings: `Part required: ${part.name} x${part.quantity}` },
+    });
+
+    res.status(201).json(part);
+  }
+);
+
+const updatePartSchema = z
+  .object({
+    status: z
+      .enum(["REQUIRED", "REQUESTED", "ORDERED", "RECEIVED", "INSTALLED", "CANCELLED"])
+      .optional(),
+    quantity: z.coerce.number().int().min(1).max(999).optional(),
+    notes: z.string().max(1000).nullable().optional(),
+  })
+  .strict();
+
+workOrdersRouter.patch(
+  "/:id/parts/:partId",
+  requireAuth,
+  requireRole("ENGINEER", "ADMIN"),
+  async (req, res) => {
+    const id = z.uuid().safeParse(req.params.id);
+    const partId = z.uuid().safeParse(req.params.partId);
+    if (!id.success || !partId.success) return res.status(404).json({ error: "Part not found." });
+
+    const parsed = updatePartSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Unrecognised field." });
+
+    const wo = await editableWorkOrder(req, res, id.data);
+    if (!wo) return;
+
+    const part = wo.parts.find((row) => row.id === partId.data);
+    if (!part) return res.status(404).json({ error: "Part not found." });
+
+    const { status, ...rest } = parsed.data;
+    let stamped: Record<string, Date> = {};
+
+    if (status && status !== part.status) {
+      const move = canMovePart(part.status, status);
+      if (!move.ok) return res.status(409).json({ error: move.reason });
+
+      // Each rung records when it was reached, so a stalled order can be
+      // read straight off the row instead of reconstructed from the log.
+      const field = PART_TIMESTAMP[status];
+      if (field) stamped = { [field]: new Date() };
+    }
+
+    const updated = await prisma.workOrderPart.update({
+      where: { id: part.id },
+      data: { ...rest, ...(status ? { status } : {}), ...stamped },
+    });
+
+    if (status && status !== part.status) {
+      await recordAudit({
+        actorId: req.user!.id,
+        action: "workorder.part_" + status.toLowerCase(),
+        entity: "WorkOrder",
+        entityId: wo.id,
+        before: { status: wo.status, findings: `${part.name}: ${part.status}` },
+        after: { status: wo.status, findings: `${part.name}: ${status}` },
+      });
+    }
+
+    res.json(updated);
+  }
+);
+
+/**
+ * Remove a part line.
+ *
+ * Only before anything has been requested. After that the line belongs to
+ * the record: cancelling it says what happened, deleting it pretends it
+ * never did.
+ */
+workOrdersRouter.delete(
+  "/:id/parts/:partId",
+  requireAuth,
+  requireRole("ENGINEER", "ADMIN"),
+  async (req, res) => {
+    const id = z.uuid().safeParse(req.params.id);
+    const partId = z.uuid().safeParse(req.params.partId);
+    if (!id.success || !partId.success) return res.status(404).json({ error: "Part not found." });
+
+    const wo = await editableWorkOrder(req, res, id.data);
+    if (!wo) return;
+
+    const part = wo.parts.find((row) => row.id === partId.data);
+    if (!part) return res.status(404).json({ error: "Part not found." });
+
+    if (part.status !== "REQUIRED") {
+      return res.status(409).json({
+        error: "This part has already been requested. Cancel it instead, so the record stands.",
+      });
+    }
+
+    await prisma.workOrderPart.delete({ where: { id: part.id } });
+    res.status(204).end();
   }
 );

@@ -35,7 +35,20 @@ const DETAIL_INCLUDE = {
   raisedBy: { select: { id: true, fullName: true } },
   acknowledgedBy: { select: { id: true, fullName: true } },
   assignedTo: { select: { id: true, fullName: true } },
-  workOrder: { select: { id: true, seq: true, status: true, createdAt: true } },
+  // Parts travel with the alert so the nurse who reported the fault can
+  // see why it is taking three weeks, which was the point of asking.
+  workOrder: {
+    select: {
+      id: true,
+      seq: true,
+      status: true,
+      createdAt: true,
+      parts: {
+        select: { id: true, name: true, quantity: true, status: true, orderedAt: true },
+        orderBy: { createdAt: "asc" as const },
+      },
+    },
+  },
 } as const;
 
 /** The stored sequence is the truth; the reference number is its presentation. */

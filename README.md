@@ -153,6 +153,14 @@ buys the device another maintenance cycle. Work-order status also drives
 `operationalStatus`, so a device under repair says so on the equipment
 list without anyone remembering to set it.
 
+**A part climbs its ladder one rung at a time.** Required, requested,
+ordered, received, installed — each with its own timestamp, because "when
+did we order it?" is the question a stalled repair always raises. Skipping
+is refused, and a work order cannot close while any part is unfitted: a
+device must not go back to the ward with a component still on order.
+Cancelling exists so a line raised in error can be retired honestly rather
+than deleted or, worse, marked installed.
+
 **Status transitions live in one pure function, not in the handlers.**
 `modules/alerts/workflow.ts` decides which moves are legal and for which
 role; routes ask it and are told. A status column any endpoint can write
@@ -188,12 +196,12 @@ npm run db:deploy
 npm run test:integration
 ```
 
-**54 unit tests** cover the grace window in both directions, the
+**65 unit tests** cover the grace window in both directions, the
 reminder ladder firing on its rungs and staying silent between them,
 calendar arithmetic across DST boundaries, and the guard that decides
 which database the integration suite may destroy.
 
-**52 integration tests** run against a real database rather than mocks,
+**61 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would
 verify nothing. They assert properties, not just outputs:
 
@@ -292,10 +300,10 @@ accountable for it.
 
 ## Not built
 
-Spare parts ordering is designed but not yet built — a work order records
-what was done, not yet what was fitted. Also absent: calibration records,
-document upload, MTBF and MTTR analytics, criticality scoring and
-replacement recommendations.
+Calibration records, document upload, MTBF and MTTR analytics,
+criticality scoring and replacement recommendations. Parts are tracked as
+line items on a work order, not as an inventory: there are no stock
+levels, suppliers or reorder points.
 
 On MTBF specifically: it needs per-device operating hours, which
 hospitals rarely record. Computing it from calendar time produces a

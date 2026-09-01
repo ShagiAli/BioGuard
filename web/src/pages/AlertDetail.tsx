@@ -17,6 +17,8 @@ import {
   ApiError,
   formatDate,
   PRIORITY_LABELS,
+  PART_STATUS_LABELS,
+  partTone,
   priorityTone,
   triagesAlerts,
   WORK_ORDER_STATUS_LABELS,
@@ -239,6 +241,24 @@ export function AlertDetail() {
               {alert.workOrder && (
                 <Field label="Work order">
                   {WORK_ORDER_STATUS_LABELS[alert.workOrder.status]}
+                </Field>
+              )}
+              {/* Why the repair is taking time, for the person waiting. */}
+              {alert.workOrder && alert.workOrder.parts.length > 0 && (
+                <Field label="Parts">
+                  <ul className="space-y-1">
+                    {alert.workOrder.parts.map((part) => (
+                      <li key={part.id} className="flex items-center gap-2">
+                        <Badge tone={partTone(part.status)}>
+                          {PART_STATUS_LABELS[part.status]}
+                        </Badge>
+                        <span className="truncate text-sm">
+                          {part.name}
+                          {part.quantity > 1 ? ` ×${part.quantity}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </Field>
               )}
             </div>

@@ -372,7 +372,13 @@ export interface Alert {
   raisedBy: { id: string; fullName: string };
   acknowledgedBy: { id: string; fullName: string } | null;
   assignedTo: { id: string; fullName: string } | null;
-  workOrder: { id: string; seq: number; status: WorkOrderStatus; createdAt: string } | null;
+  workOrder: {
+    id: string;
+    seq: number;
+    status: WorkOrderStatus;
+    createdAt: string;
+    parts: Pick<WorkOrderPart, "id" | "name" | "quantity" | "status" | "orderedAt">[];
+  } | null;
   duplicateOf?: { id: string; number: string } | null;
 }
 
@@ -396,9 +402,72 @@ export interface WorkOrder {
     status: AlertStatus;
     raisedBy: { id: string; fullName: string };
   };
+  parts: WorkOrderPart[];
   equipment: { id: string; name: string; assetNo: string; operationalStatus: OperationalStatus };
   engineer: { id: string; fullName: string };
   closedBy: { id: string; fullName: string } | null;
+}
+
+export type PartStatus =
+  | "REQUIRED"
+  | "REQUESTED"
+  | "ORDERED"
+  | "RECEIVED"
+  | "INSTALLED"
+  | "CANCELLED";
+
+export interface WorkOrderPart {
+  id: string;
+  name: string;
+  partNumber: string | null;
+  quantity: number;
+  status: PartStatus;
+  notes: string | null;
+  requestedAt: string | null;
+  orderedAt: string | null;
+  receivedAt: string | null;
+  installedAt: string | null;
+  cancelledAt: string | null;
+}
+
+/** The rung a part may climb to next; empty once it is finished. */
+export const NEXT_PART_STATUS: Record<PartStatus, PartStatus | null> = {
+  REQUIRED: "REQUESTED",
+  REQUESTED: "ORDERED",
+  ORDERED: "RECEIVED",
+  RECEIVED: "INSTALLED",
+  INSTALLED: null,
+  CANCELLED: null,
+};
+
+export const PART_STATUS_LABELS: Record<PartStatus, string> = {
+  REQUIRED: "Required",
+  REQUESTED: "Requested",
+  ORDERED: "Ordered",
+  RECEIVED: "Received",
+  INSTALLED: "Installed",
+  CANCELLED: "Cancelled",
+};
+
+/** The button that advances a part says what it does, not where it lands. */
+export const PART_ADVANCE_LABELS: Record<PartStatus, string> = {
+  REQUIRED: "Request",
+  REQUESTED: "Mark ordered",
+  ORDERED: "Mark received",
+  RECEIVED: "Mark installed",
+  INSTALLED: "",
+  CANCELLED: "",
+};
+
+export function partTone(status: PartStatus): "emerald" | "amber" | "sky" | "slate" {
+  if (status === "INSTALLED") return "emerald";
+  if (status === "CANCELLED") return "slate";
+  if (status === "REQUIRED") return "amber";
+  return "sky";
+}
+
+export function isPartOutstanding(status: PartStatus): boolean {
+  return status !== "INSTALLED" && status !== "CANCELLED";
 }
 
 export interface AlertSummary {

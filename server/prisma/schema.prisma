@@ -90,6 +90,19 @@ enum AlertStatus {
   CANCELLED
 }
 
+/// The ladder a part climbs, plus the exit for one that turns out not to
+/// be needed. Without CANCELLED the only ways to retire a mistaken line
+/// would be deleting it — losing the record that it was ever ordered — or
+/// marking it installed, which is a lie.
+enum PartStatus {
+  REQUIRED
+  REQUESTED
+  ORDERED
+  RECEIVED
+  INSTALLED
+  CANCELLED
+}
+
 enum WorkOrderStatus {
   INVESTIGATING
   AWAITING_PARTS
@@ -471,7 +484,37 @@ model WorkOrder {
   maintenanceRecordId String?            @unique @db.Uuid
   maintenanceRecord   MaintenanceRecord? @relation(fields: [maintenanceRecordId], references: [id])
 
+  parts WorkOrderPart[]
+
   @@index([status, priority])
   @@index([engineerId, status])
   @@index([equipmentId])
+}
+
+/// A part needed for a repair, and how far along it is.
+///
+/// A line item rather than a catalogue entry: this records what one job
+/// needed, not what the hospital stocks. Each step carries its own
+/// timestamp, because "ordered three weeks ago" is the question people
+/// actually ask of a stalled repair.
+model WorkOrderPart {
+  id          String     @id @default(uuid(7)) @db.Uuid
+  workOrderId String     @db.Uuid
+  workOrder   WorkOrder  @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  name        String
+  partNumber  String?
+  quantity    Int        @default(1)
+  status      PartStatus @default(REQUIRED)
+  notes       String?
+
+  requestedAt DateTime?
+  orderedAt   DateTime?
+  receivedAt  DateTime?
+  installedAt DateTime?
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workOrderId, status])
 }

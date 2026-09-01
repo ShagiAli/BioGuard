@@ -998,3 +998,204 @@ describe("work orders", () => {
     for (const row of res.body.rows) expect(row.status).toBe("CLOSED");
   });
 });
+
+describe("parts", () => {
+  /** A work order in progress, owned by the seeded engineer. */
+  async function openWorkOrder() {
+    const nurse = await login(seeded.nurseEmail);
+    const alert = await request(app)
+      .post("/api/alerts")
+      .set("Cookie", nurse)
+      .send({ equipmentId: seeded.ownDeviceId, description: "Pump leaking.", priority: "MEDIUM" })
+      .expect(201);
+
+    const head = await login(seeded.headEmail);
+    await request(app).post(`/api/alerts/${alert.body.id}/acknowledge`).set("Cookie", head);
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    await request(app)
+      .post(`/api/alerts/${alert.body.id}/assign`)
+      .set("Cookie", head)
+      .send({ engineerId: engineer.id });
+
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.body.id })
+      .expect(201);
+
+    return { alertId: alert.body.id, workOrderId: wo.body.id, cookie };
+  }
+
+  async function addPart(workOrderId: string, cookie: string[], name = "Seal kit") {
+    const res = await request(app)
+      .post(`/api/work-orders/${workOrderId}/parts`)
+      .set("Cookie", cookie)
+      .send({ name, partNumber: "SK-4471", quantity: 2 })
+      .expect(201);
+    return res.body;
+  }
+
+  it("records a required part against the work order", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    const part = await addPart(workOrderId, cookie);
+
+    expect(part.status).toBe("REQUIRED");
+    expect(part.quantity).toBe(2);
+    expect(part.requestedAt).toBeNull();
+  });
+
+  it("stamps each rung as the part climbs it", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    const part = await addPart(workOrderId, cookie);
+
+    const move = async (status: string) =>
+      request(app)
+        .patch(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+        .set("Cookie", cookie)
+        .send({ status })
+        .expect(200);
+
+    expect((await move("REQUESTED")).body.requestedAt).not.toBeNull();
+    expect((await move("ORDERED")).body.orderedAt).not.toBeNull();
+    expect((await move("RECEIVED")).body.receivedAt).not.toBeNull();
+    const installed = await move("INSTALLED");
+    expect(installed.body.installedAt).not.toBeNull();
+    // The earlier stamps survive: the whole history is on the row.
+    expect(installed.body.orderedAt).not.toBeNull();
+  });
+
+  it("refuses to skip a rung", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    const part = await addPart(workOrderId, cookie);
+
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "INSTALLED" })
+      .expect(409);
+  });
+
+  it("will not close a work order over an outstanding part", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    const part = await addPart(workOrderId, cookie);
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "REQUESTED" });
+
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}`)
+      .set("Cookie", cookie)
+      .send({ status: "COMPLETED" });
+
+    // The device must not go back to the ward with a part still on order.
+    const refused = await request(app)
+      .post(`/api/work-orders/${workOrderId}/close`)
+      .set("Cookie", cookie)
+      .send({ repairActions: "Done.", finalResolution: "Fine." })
+      .expect(409);
+    expect(refused.body.error).toMatch(/outstanding/);
+  });
+
+  it("closes once every part is settled", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    const fitted = await addPart(workOrderId, cookie, "Seal kit");
+    const spare = await addPart(workOrderId, cookie, "Spare hose");
+
+    for (const status of ["REQUESTED", "ORDERED", "RECEIVED", "INSTALLED"]) {
+      await request(app)
+        .patch(`/api/work-orders/${workOrderId}/parts/${fitted.id}`)
+        .set("Cookie", cookie)
+        .send({ status });
+    }
+    // The second turned out not to be needed. Cancelled, not deleted.
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}/parts/${spare.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "CANCELLED" })
+      .expect(200);
+
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}`)
+      .set("Cookie", cookie)
+      .send({ status: "COMPLETED" });
+
+    await request(app)
+      .post(`/api/work-orders/${workOrderId}/close`)
+      .set("Cookie", cookie)
+      .send({ repairActions: "Fitted seal kit.", finalResolution: "Leak stopped." })
+      .expect(200);
+  });
+
+  it("deletes a part only before anything was requested", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    const part = await addPart(workOrderId, cookie);
+
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "REQUESTED" });
+
+    // Once requested, the line is part of the record.
+    await request(app)
+      .delete(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+      .set("Cookie", cookie)
+      .expect(409);
+
+    const fresh = await addPart(workOrderId, cookie, "Mistake");
+    await request(app)
+      .delete(`/api/work-orders/${workOrderId}/parts/${fresh.id}`)
+      .set("Cookie", cookie)
+      .expect(204);
+  });
+
+  it("shows the reporting nurse where her part has got to", async () => {
+    const { alertId, workOrderId, cookie } = await openWorkOrder();
+    const part = await addPart(workOrderId, cookie);
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "REQUESTED" });
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}/parts/${part.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "ORDERED" });
+
+    const nurse = await login(seeded.nurseEmail);
+    const res = await request(app).get(`/api/alerts/${alertId}`).set("Cookie", nurse).expect(200);
+
+    // She reported it; she can see why it is taking time.
+    expect(res.body.workOrder.parts[0].status).toBe("ORDERED");
+    expect(res.body.workOrder.parts[0].orderedAt).not.toBeNull();
+  });
+
+  it("keeps parts out of another engineer's hands", async () => {
+    const { workOrderId } = await openWorkOrder();
+    const cookie = await login(seeded.sameDeptEngineerEmail);
+    await request(app)
+      .post(`/api/work-orders/${workOrderId}/parts`)
+      .set("Cookie", cookie)
+      .send({ name: "Not mine" })
+      .expect(403);
+  });
+
+  it("freezes parts once the work order is closed", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    await request(app)
+      .patch(`/api/work-orders/${workOrderId}`)
+      .set("Cookie", cookie)
+      .send({ status: "COMPLETED" });
+    await request(app)
+      .post(`/api/work-orders/${workOrderId}/close`)
+      .set("Cookie", cookie)
+      .send({ repairActions: "No parts needed.", finalResolution: "Reseated connector." })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/work-orders/${workOrderId}/parts`)
+      .set("Cookie", cookie)
+      .send({ name: "Too late" })
+      .expect(403);
+  });
+});

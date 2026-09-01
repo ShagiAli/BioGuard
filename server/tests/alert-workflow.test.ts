@@ -5,16 +5,20 @@
  * exhaustively rather than by example. Pure, so no database is needed.
  */
 import { describe, expect, it } from "vitest";
-import type { AlertStatus, Role, WorkOrderStatus } from "@prisma/client";
+import type { AlertStatus, PartStatus, Role, WorkOrderStatus } from "@prisma/client";
 import {
   alertNumber,
   canEditWorkOrder,
+  canMovePart,
   canMoveWorkOrder,
   canTransitionAlert,
   deviceStatusFor,
   isAlertClosed,
+  isPartOutstanding,
   maintenanceTypeFor,
   notifyLevelFor,
+  PART_TIMESTAMP,
+  partsSettled,
   workOrderNumber,
 } from "../src/modules/alerts/workflow.js";
 
@@ -208,5 +212,89 @@ describe("reference numbers", () => {
 
   it("takes the year from the record, not from today", () => {
     expect(alertNumber(7, new Date("2025-01-02T00:00:00.000Z"))).toBe("ALT-2025-000007");
+  });
+});
+
+describe("parts ladder", () => {
+  const EVERY: PartStatus[] = [
+    "REQUIRED",
+    "REQUESTED",
+    "ORDERED",
+    "RECEIVED",
+    "INSTALLED",
+    "CANCELLED",
+  ];
+
+  it("climbs one rung at a time", () => {
+    expect(canMovePart("REQUIRED", "REQUESTED").ok).toBe(true);
+    expect(canMovePart("REQUESTED", "ORDERED").ok).toBe(true);
+    expect(canMovePart("ORDERED", "RECEIVED").ok).toBe(true);
+    expect(canMovePart("RECEIVED", "INSTALLED").ok).toBe(true);
+  });
+
+  it("refuses to skip a rung", () => {
+    // Each rung is a real event with its own timestamp. Skipping leaves a
+    // gap nobody can explain when asked when the part was ordered.
+    expect(canMovePart("REQUIRED", "ORDERED").ok).toBe(false);
+    expect(canMovePart("REQUIRED", "INSTALLED").ok).toBe(false);
+    expect(canMovePart("REQUESTED", "RECEIVED").ok).toBe(false);
+  });
+
+  it("refuses to climb back down", () => {
+    expect(canMovePart("ORDERED", "REQUESTED").ok).toBe(false);
+    expect(canMovePart("INSTALLED", "RECEIVED").ok).toBe(false);
+  });
+
+  it("lets an unfinished part be cancelled from anywhere", () => {
+    for (const from of ["REQUIRED", "REQUESTED", "ORDERED", "RECEIVED"] as const) {
+      expect(canMovePart(from, "CANCELLED").ok).toBe(true);
+    }
+  });
+
+  it("treats installed and cancelled as final", () => {
+    for (const from of ["INSTALLED", "CANCELLED"] as const) {
+      for (const to of EVERY) {
+        if (from === to) continue;
+        expect(canMovePart(from, to).ok).toBe(false);
+      }
+    }
+  });
+
+  it("stamps every rung except the first", () => {
+    // REQUIRED is the state a part is created in, so createdAt already
+    // records it; the rest each need their own moment.
+    expect(PART_TIMESTAMP.REQUIRED).toBeNull();
+    for (const s of ["REQUESTED", "ORDERED", "RECEIVED", "INSTALLED", "CANCELLED"] as const) {
+      expect(PART_TIMESTAMP[s]).toMatch(/At$/);
+    }
+  });
+
+  it("counts only unfinished parts as outstanding", () => {
+    for (const s of EVERY) {
+      expect(isPartOutstanding(s)).toBe(s !== "INSTALLED" && s !== "CANCELLED");
+    }
+  });
+});
+
+describe("closing over outstanding parts", () => {
+  it("is allowed when there are no parts at all", () => {
+    expect(partsSettled([]).ok).toBe(true);
+  });
+
+  it("is allowed when every part is installed or cancelled", () => {
+    expect(partsSettled(["INSTALLED", "CANCELLED", "INSTALLED"]).ok).toBe(true);
+  });
+
+  it("is refused while a part is still on order", () => {
+    // Returning a device to the ward with a component still on order is
+    // the failure the ladder exists to make visible.
+    const r = partsSettled(["INSTALLED", "ORDERED"]);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/1 part is still outstanding/);
+  });
+
+  it("counts them, and says so in the plural", () => {
+    const r = partsSettled(["REQUIRED", "REQUESTED", "RECEIVED"]);
+    expect(r.reason).toMatch(/3 parts are still outstanding/);
   });
 });

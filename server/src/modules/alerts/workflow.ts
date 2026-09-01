@@ -13,6 +13,7 @@
 import type {
   AlertStatus,
   OperationalStatus,
+  PartStatus,
   Priority,
   Role,
   WorkOrderStatus,
@@ -114,7 +115,7 @@ const PAST_TENSE: Record<AlertAction, string> = {
   cancel: "cancelled",
 };
 
-function humanStatus(status: AlertStatus | WorkOrderStatus): string {
+function humanStatus(status: AlertStatus | WorkOrderStatus | PartStatus): string {
   return status.toLowerCase().replace(/_/g, " ");
 }
 
@@ -186,6 +187,69 @@ export function deviceStatusFor(status: WorkOrderStatus): OperationalStatus | nu
     case "CANCELLED":
       return null;
   }
+}
+
+// -------------------------------------------------------------- parts
+
+/**
+ * Parts climb one rung at a time.
+ *
+ * Skipping is refused because each rung is a real event with its own
+ * timestamp — a part marked installed without ever being ordered leaves a
+ * gap nobody can explain later, and "when did we order it?" is the
+ * question a stalled repair always raises.
+ *
+ * CANCELLED is reachable from anywhere unfinished, so a line raised in
+ * error can be retired honestly rather than deleted or, worse, marked
+ * installed.
+ */
+const PART_FLOW: Record<PartStatus, readonly PartStatus[]> = {
+  REQUIRED: ["REQUESTED", "CANCELLED"],
+  REQUESTED: ["ORDERED", "CANCELLED"],
+  ORDERED: ["RECEIVED", "CANCELLED"],
+  RECEIVED: ["INSTALLED", "CANCELLED"],
+  INSTALLED: [],
+  CANCELLED: [],
+};
+
+export function canMovePart(from: PartStatus, to: PartStatus): TransitionResult {
+  if (from === to) return { ok: true };
+  if (PART_FLOW[from].includes(to)) return { ok: true };
+  return {
+    ok: false,
+    reason: `A part that is ${humanStatus(from)} cannot move straight to ${humanStatus(to)}.`,
+  };
+}
+
+/** The column recording when a part reached its current rung. */
+export const PART_TIMESTAMP: Record<PartStatus, string | null> = {
+  REQUIRED: null,
+  REQUESTED: "requestedAt",
+  ORDERED: "orderedAt",
+  RECEIVED: "receivedAt",
+  INSTALLED: "installedAt",
+  CANCELLED: "cancelledAt",
+};
+
+/** A part still expected to arrive or be fitted. */
+export function isPartOutstanding(status: PartStatus): boolean {
+  return status !== "INSTALLED" && status !== "CANCELLED";
+}
+
+/**
+ * Whether a work order may be closed given its parts.
+ *
+ * Closing over an outstanding part would return a device to service while
+ * a component is still on order — precisely the failure this ladder
+ * exists to make visible.
+ */
+export function partsSettled(statuses: readonly PartStatus[]): TransitionResult {
+  const waiting = statuses.filter(isPartOutstanding);
+  if (waiting.length === 0) return { ok: true };
+  return {
+    ok: false,
+    reason: `${waiting.length} part${waiting.length === 1 ? " is" : "s are"} still outstanding. Mark each one installed, or cancel it.`,
+  };
 }
 
 // ------------------------------------------------------------ display

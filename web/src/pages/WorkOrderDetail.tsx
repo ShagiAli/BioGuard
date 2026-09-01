@@ -25,6 +25,7 @@ import {
 } from "../lib/api";
 import { Badge, Button, Card, ErrorNote, Field, Spinner } from "../components/ui";
 import { useAuth } from "../auth";
+import { PartsPanel } from "../components/PartsPanel";
 
 /** The states an engineer moves through by hand; CLOSED has its own form. */
 const LIVE_STATUSES: WorkOrderStatus[] = [
@@ -160,6 +161,12 @@ export function WorkOrderDetail() {
               />
             </div>
           </Card>
+
+          <PartsPanel
+            workOrderId={wo.id}
+            parts={wo.parts}
+            editable={canEdit && (user?.id === wo.engineer.id || user?.role === "ADMIN")}
+          />
 
           {wo.finalResolution && (
             <Card className="p-4">
