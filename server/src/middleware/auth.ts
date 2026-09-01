@@ -120,3 +120,45 @@ export function canSeeCosts(user: SessionUser): boolean {
 export function oversees(user: SessionUser): boolean {
   return user.role === "ADMIN" || user.role === "MANAGER";
 }
+
+/**
+ * Who triages incoming alerts.
+ *
+ * Deliberately not `oversees()`. That decides who sees the whole
+ * preventive programme; this decides who may acknowledge an alert and
+ * hand it to an engineer. A manager watching maintenance drift should not
+ * silently acquire the power to assign work, which is exactly what would
+ * happen if these shared a helper.
+ */
+export function triagesAlerts(user: SessionUser): boolean {
+  return user.role === "ADMIN" || user.role === "HEAD_OF_ALERTS";
+}
+
+/**
+ * The scope filter every alert query must spread into its `where`.
+ *
+ * Mirrors equipmentScope: centralised so that omitting it is a visible
+ * mistake rather than a silent leak.
+ *
+ *  - triage roles and managers see the whole stream
+ *  - an engineer sees what is assigned to them, plus their department's
+ *  - everyone else sees what they raised
+ *
+ * Ward staff are scoped to what they raised rather than to their
+ * department, because an alert is a personal thread: the nurse who
+ * reported the fault is the one waiting on an answer.
+ */
+export function alertScope(user: SessionUser) {
+  if (triagesAlerts(user) || user.role === "MANAGER") return {};
+
+  if (user.role === "ENGINEER") {
+    return {
+      OR: [
+        { assignedToId: user.id },
+        ...(user.departmentId ? [{ equipment: { departmentId: user.departmentId } }] : []),
+      ],
+    };
+  }
+
+  return { raisedById: user.id };
+}

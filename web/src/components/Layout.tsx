@@ -7,12 +7,19 @@ import {
   Boxes,
   Clock,
   History,
+  Siren,
   LayoutDashboard,
   LogOut,
   Mail,
   RotateCcw,
 } from "lucide-react";
-import { api, formatDate, titleCase, type SchedulerHealth } from "../lib/api";
+import {
+  api,
+  formatDate,
+  titleCase,
+  type AlertSummary,
+  type SchedulerHealth,
+} from "../lib/api";
 import { useAuth } from "../auth";
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -34,6 +41,13 @@ export function Layout({ children }: { children: ReactNode }) {
     refetchInterval: 60_000,
   });
 
+  // Counts unresolved alerts within whatever this role can see.
+  const alerts = useQuery({
+    queryKey: ["alerts", "badge"],
+    queryFn: () => api.get<AlertSummary>("/api/alerts/summary"),
+    refetchInterval: 60_000,
+  });
+
   // Same split the API applies: oversight roles see the whole programme
   // rather than their own workload.
   const oversees = user?.role === "ADMIN" || user?.role === "MANAGER";
@@ -43,6 +57,9 @@ export function Layout({ children }: { children: ReactNode }) {
     { to: "/equipment", label: "Equipment", icon: Boxes, end: false },
     { to: "/notifications", label: "Notifications", icon: Bell, end: false, count: data?.unread },
     { to: "/mail", label: "Mail", icon: Mail, end: false, count: mail.data?.unread },
+    // Unlike Activity, this is not gated: every role has a stake in
+    // alerts, and the API decides which ones each of them can see.
+    { to: "/alerts", label: "Alerts", icon: Siren, end: false, count: alerts.data?.open },
     ...(oversees
       ? [{ to: "/activity", label: "Activity", icon: History, end: false, count: undefined }]
       : []),

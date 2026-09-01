@@ -84,6 +84,7 @@ server/
   src/middleware/    session loading, role checks, query scoping
   src/modules/       auth · equipment · maintenance · admin
                      notifications · mail · audit
+                     alerts · work-orders
   src/scheduler/
       rules.ts       pure scheduling logic, no I/O
       job.ts         pg-boss wiring for the nightly sweep
@@ -142,6 +143,22 @@ reading it is standing at a bedside with a phone and no session.
 sensor is not the scheduled service and must not buy the device another
 cycle.
 
+**Corrective work is a separate pipeline from preventive work.** A nurse
+reports a fault, the head of alerts confirms receipt and assigns it, an
+engineer opens a work order, and closing it returns the device to service.
+The two pipelines meet at exactly one point: closing a work order writes a
+`CORRECTIVE` maintenance record, so the repair joins the device's history
+— but because only `PREVENTIVE` work resets the schedule, a repair never
+buys the device another maintenance cycle. Work-order status also drives
+`operationalStatus`, so a device under repair says so on the equipment
+list without anyone remembering to set it.
+
+**Status transitions live in one pure function, not in the handlers.**
+`modules/alerts/workflow.ts` decides which moves are legal and for which
+role; routes ask it and are told. A status column any endpoint can write
+becomes untraceable within a month, and the permission rules end up
+restated slightly differently in a dozen places.
+
 **A scheduler that stops is louder than one that fails.** The API stays
 up when the scheduler dies — engineers can still record work — which
 means the dangerous failure is the quiet one: reminders stop and the site
@@ -171,12 +188,12 @@ npm run db:deploy
 npm run test:integration
 ```
 
-**27 unit tests** cover the grace window in both directions, the
+**54 unit tests** cover the grace window in both directions, the
 reminder ladder firing on its rungs and staying silent between them,
 calendar arithmetic across DST boundaries, and the guard that decides
 which database the integration suite may destroy.
 
-**30 integration tests** run against a real database rather than mocks,
+**52 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would
 verify nothing. They assert properties, not just outputs:
 
@@ -275,11 +292,10 @@ accountable for it.
 
 ## Not built
 
-Repair tickets, calibration records, spare parts inventory, document
-upload, MTBF and MTTR analytics, criticality scoring and replacement
-recommendations. The schema and module layout accommodate each without
-rework; they were left out deliberately in favour of building the
-maintenance engine properly.
+Spare parts ordering is designed but not yet built — a work order records
+what was done, not yet what was fitted. Also absent: calibration records,
+document upload, MTBF and MTTR analytics, criticality scoring and
+replacement recommendations.
 
 On MTBF specifically: it needs per-device operating hours, which
 hospitals rarely record. Computing it from calendar time produces a

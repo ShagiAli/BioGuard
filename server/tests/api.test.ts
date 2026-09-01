@@ -24,6 +24,9 @@ interface Seeded {
   engineerEmail: string;
   otherEngineerEmail: string;
   adminEmail: string;
+  nurseEmail: string;
+  headEmail: string;
+  sameDeptEngineerEmail: string;
   ownDeviceId: string;
   otherDeviceId: string;
 }
@@ -69,6 +72,8 @@ beforeAll(async () => {
   // Clean slate. Order matters: children before parents.
   await prisma.auditLog.deleteMany();
   await prisma.sweepRun.deleteMany();
+  await prisma.workOrder.deleteMany();
+  await prisma.alert.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.sentEmail.deleteMany();
   await prisma.notificationDispatch.deleteMany();
@@ -114,6 +119,35 @@ beforeAll(async () => {
   const admin = await prisma.user.create({
     data: { email: "admin@test.local", passwordHash: hash, fullName: "Admin", role: "ADMIN" },
   });
+  const nurse = await prisma.user.create({
+    data: {
+      email: "nurse@test.local",
+      passwordHash: hash,
+      fullName: "ICU Nurse",
+      role: "STAFF",
+      departmentId: icu.id,
+    },
+  });
+  // A second engineer in the *same* department as `engineer`: needed to
+  // tell "cannot see this alert" apart from "can see it, but it is not
+  // yours" — those are 404 and 403 respectively.
+  const sameDept = await prisma.user.create({
+    data: {
+      email: "eng.icu2@test.local",
+      passwordHash: hash,
+      fullName: "Second ICU Engineer",
+      role: "ENGINEER",
+      departmentId: icu.id,
+    },
+  });
+  const head = await prisma.user.create({
+    data: {
+      email: "head@test.local",
+      passwordHash: hash,
+      fullName: "Head of Alerts",
+      role: "HEAD_OF_ALERTS",
+    },
+  });
 
   const base = {
     categoryId: category.id,
@@ -158,6 +192,9 @@ beforeAll(async () => {
     engineerEmail: engineer.email,
     otherEngineerEmail: other.email,
     adminEmail: admin.email,
+    nurseEmail: nurse.email,
+    headEmail: head.email,
+    sameDeptEngineerEmail: sameDept.email,
     ownDeviceId: ownDevice.id,
     otherDeviceId: otherDevice.id,
   };
@@ -614,5 +651,350 @@ describe("list contracts", () => {
     const cookie = await login(seeded.engineerEmail);
     await request(app).get("/api/mail?nonsense=1").set("Cookie", cookie).expect(400);
     await request(app).get("/api/notifications?nonsense=1").set("Cookie", cookie).expect(400);
+  });
+});
+
+describe("alerts", () => {
+  async function raise(priority = "MEDIUM") {
+    const cookie = await login(seeded.nurseEmail);
+    const res = await request(app)
+      .post("/api/alerts")
+      .set("Cookie", cookie)
+      .send({
+        equipmentId: seeded.ownDeviceId,
+        description: "Alarm sounding continuously, display frozen.",
+        priority,
+      })
+      .expect(201);
+    return res.body;
+  }
+
+  it("gives every alert a readable reference number", async () => {
+    const alert = await raise();
+    expect(alert.number).toMatch(/^ALT-\d{4}-\d{6}$/);
+    expect(alert.status).toBe("OPEN");
+    expect(alert.raisedBy.fullName).toBe("ICU Nurse");
+  });
+
+  it("stops a nurse reporting a device outside her department", async () => {
+    const cookie = await login(seeded.nurseEmail);
+    // 404 rather than 403: a 403 would confirm the device exists.
+    await request(app)
+      .post("/api/alerts")
+      .set("Cookie", cookie)
+      .send({ equipmentId: seeded.otherDeviceId, description: "x", priority: "LOW" })
+      .expect(404);
+  });
+
+  it("warns about a duplicate without blocking it", async () => {
+    await raise();
+    const second = await raise();
+    // Two nurses reporting one fault is ordinary; the second is told.
+    expect(second.duplicateOf).not.toBeNull();
+    expect(second.duplicateOf.number).toMatch(/^ALT-/);
+  });
+
+  it("refuses a nurse the triage actions", async () => {
+    const alert = await raise();
+    const cookie = await login(seeded.nurseEmail);
+    await request(app)
+      .post(`/api/alerts/${alert.id}/acknowledge`)
+      .set("Cookie", cookie)
+      .expect(403);
+  });
+
+  it("refuses a manager the triage actions", async () => {
+    // MANAGER oversees preventive maintenance; that must not confer triage.
+    const alert = await raise();
+    const manager = await prisma.user.upsert({
+      where: { email: "pm.manager@test.local" },
+      update: {},
+      create: {
+        email: "pm.manager@test.local",
+        passwordHash: await hashPassword(PASSWORD),
+        fullName: "PM Manager",
+        role: "MANAGER",
+      },
+    });
+    const cookie = await login(manager.email);
+    await request(app)
+      .post(`/api/alerts/${alert.id}/acknowledge`)
+      .set("Cookie", cookie)
+      .expect(403);
+  });
+
+  it("records who acknowledged an alert and when", async () => {
+    const alert = await raise();
+    const cookie = await login(seeded.headEmail);
+    const res = await request(app)
+      .post(`/api/alerts/${alert.id}/acknowledge`)
+      .set("Cookie", cookie)
+      .expect(200);
+
+    expect(res.body.status).toBe("ACKNOWLEDGED");
+    expect(res.body.acknowledgedBy.fullName).toBe("Head of Alerts");
+    expect(res.body.acknowledgedAt).not.toBeNull();
+  });
+
+  it("refuses to acknowledge the same alert twice", async () => {
+    const alert = await raise();
+    const cookie = await login(seeded.headEmail);
+    await request(app)
+      .post(`/api/alerts/${alert.id}/acknowledge`)
+      .set("Cookie", cookie)
+      .expect(200);
+    // 409, not 403: the role is right, the moment is wrong.
+    await request(app)
+      .post(`/api/alerts/${alert.id}/acknowledge`)
+      .set("Cookie", cookie)
+      .expect(409);
+  });
+
+  it("will not assign before acknowledging", async () => {
+    const alert = await raise();
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    const cookie = await login(seeded.headEmail);
+    await request(app)
+      .post(`/api/alerts/${alert.id}/assign`)
+      .set("Cookie", cookie)
+      .send({ engineerId: engineer.id })
+      .expect(409);
+  });
+
+  it("refuses to assign to somebody who is not an available engineer", async () => {
+    const alert = await raise();
+    const cookie = await login(seeded.headEmail);
+    await request(app).post(`/api/alerts/${alert.id}/acknowledge`).set("Cookie", cookie);
+
+    const nurse = await prisma.user.findFirstOrThrow({ where: { email: seeded.nurseEmail } });
+    // Work assigned to a non-engineer is work nobody will ever see.
+    await request(app)
+      .post(`/api/alerts/${alert.id}/assign`)
+      .set("Cookie", cookie)
+      .send({ engineerId: nurse.id })
+      .expect(400);
+  });
+
+  it("notifies the assigned engineer, at the priority of the alert", async () => {
+    const alert = await raise("EMERGENCY");
+    const head = await login(seeded.headEmail);
+    await request(app).post(`/api/alerts/${alert.id}/acknowledge`).set("Cookie", head);
+
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    await request(app)
+      .post(`/api/alerts/${alert.id}/assign`)
+      .set("Cookie", head)
+      .send({ engineerId: engineer.id })
+      .expect(200);
+
+    const notified = await prisma.notification.findFirst({
+      where: { recipientId: engineer.id, alertId: alert.id },
+    });
+    expect(notified).not.toBeNull();
+    // An emergency arrives as urgent, not as routine information.
+    expect(notified!.level).toBe("URGENT");
+  });
+});
+
+describe("work orders", () => {
+  /** Raise, acknowledge and assign, returning an alert ready for an engineer. */
+  async function assignedAlert(priority = "MEDIUM") {
+    const nurse = await login(seeded.nurseEmail);
+    const created = await request(app)
+      .post("/api/alerts")
+      .set("Cookie", nurse)
+      .send({ equipmentId: seeded.ownDeviceId, description: "Will not power on.", priority })
+      .expect(201);
+
+    const head = await login(seeded.headEmail);
+    await request(app).post(`/api/alerts/${created.body.id}/acknowledge`).set("Cookie", head);
+
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    await request(app)
+      .post(`/api/alerts/${created.body.id}/assign`)
+      .set("Cookie", head)
+      .send({ engineerId: engineer.id })
+      .expect(200);
+
+    return created.body;
+  }
+
+  it("opening a work order starts the alert and marks the device under repair", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id, findings: "Power supply board scorched." })
+      .expect(201);
+
+    expect(wo.body.number).toMatch(/^WO-\d{4}-\d{6}$/);
+    expect(wo.body.alert.status).toBe("IN_PROGRESS");
+
+    const device = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+    expect(device.operationalStatus).toBe("UNDER_REPAIR");
+  });
+
+  it("hides an alert from an engineer in another department", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.otherEngineerEmail);
+    // 404, not 403: out of scope entirely, and a 403 would confirm it exists.
+    await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id })
+      .expect(404);
+  });
+
+  it("refuses a colleague who can see the alert but was not assigned it", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.sameDeptEngineerEmail);
+    // Same department, so visible — but taking somebody else's job would
+    // leave two engineers believing they owned it.
+    await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id })
+      .expect(403);
+  });
+
+  it("allows only one work order per alert", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+    await request(app).post("/api/work-orders").set("Cookie", cookie).send({ alertId: alert.id });
+    await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id })
+      .expect(409);
+  });
+
+  it("shows the device as awaiting parts when the work order says so", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id });
+
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "AWAITING_PARTS" })
+      .expect(200);
+
+    const device = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+    expect(device.operationalStatus).toBe("AWAITING_PARTS");
+  });
+
+  it("refuses to close before the work is marked complete", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id });
+
+    await request(app)
+      .post(`/api/work-orders/${wo.body.id}/close`)
+      .set("Cookie", cookie)
+      .send({ repairActions: "Replaced board.", finalResolution: "Back in service." })
+      .expect(409);
+  });
+
+  it("closing writes a corrective record and leaves the schedule alone", async () => {
+    const before = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+
+    const alert = await assignedAlert("EMERGENCY");
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id });
+
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "COMPLETED" });
+
+    const closed = await request(app)
+      .post(`/api/work-orders/${wo.body.id}/close`)
+      .set("Cookie", cookie)
+      .send({
+        repairActions: "Replaced power supply board.",
+        finalResolution: "Tested and returned to service.",
+        cost: 420,
+        downtimeHours: 6,
+      })
+      .expect(200);
+
+    expect(closed.body.status).toBe("CLOSED");
+
+    const record = await prisma.maintenanceRecord.findUniqueOrThrow({
+      where: { id: closed.body.maintenanceRecordId },
+    });
+    // An emergency repair is recorded as one, and it is not preventive —
+    // so it must not have moved the maintenance schedule.
+    expect(record.type).toBe("EMERGENCY");
+    expect(record.workPerformed).toBe("Replaced power supply board.");
+
+    const after = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+    expect(after.nextDueAt).toEqual(before.nextDueAt);
+    expect(after.lastCompletedAt).toEqual(before.lastCompletedAt);
+    // And the device is back in service.
+    expect(after.operationalStatus).toBe("OPERATIONAL");
+
+    const resolved = await prisma.alert.findUniqueOrThrow({ where: { id: alert.id } });
+    expect(resolved.status).toBe("RESOLVED");
+  });
+
+  it("is read-only once closed, except to an administrator", async () => {
+    const alert = await assignedAlert();
+    const engineer = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", engineer)
+      .send({ alertId: alert.id });
+
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", engineer)
+      .send({ status: "COMPLETED" });
+    await request(app)
+      .post(`/api/work-orders/${wo.body.id}/close`)
+      .set("Cookie", engineer)
+      .send({ repairActions: "Done.", finalResolution: "Fine." })
+      .expect(200);
+
+    // The engineer who did the work can no longer revise the record.
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", engineer)
+      .send({ findings: "Actually it was something else." })
+      .expect(403);
+
+    const admin = await login(seeded.adminEmail);
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", admin)
+      .send({ findings: "Corrected after review." })
+      .expect(200);
+
+    // And the correction is distinguishable from ordinary work.
+    const entry = await prisma.auditLog.findFirst({
+      where: { entity: "WorkOrder", entityId: wo.body.id, action: "workorder.edited_after_close" },
+    });
+    expect(entry).not.toBeNull();
+  });
+
+  it("keeps the closed archive queryable", async () => {
+    const cookie = await login(seeded.adminEmail);
+    const res = await request(app)
+      .get("/api/work-orders?archived=true")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(res.body.total).toBeGreaterThan(0);
+    for (const row of res.body.rows) expect(row.status).toBe("CLOSED");
   });
 });

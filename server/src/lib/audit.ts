@@ -25,6 +25,17 @@ const ALLOWED_FIELDS: Record<string, readonly string[]> = {
   ],
   MaintenanceRecord: ["type", "completedOn", "cost", "downtimeHours", "rebased", "nextDueAfter"],
   User: ["email", "fullName", "role", "departmentId", "isActive"], // never passwordHash
+  Alert: ["status", "priority", "assignedToId", "acknowledgedById", "cancelledReason"],
+  WorkOrder: [
+    "status",
+    "priority",
+    "engineerId",
+    "findings",
+    "diagnosis",
+    "repairActions",
+    "finalResolution",
+    "closedById",
+  ],
 };
 
 function pick(entity: string, source?: Record<string, unknown> | null) {

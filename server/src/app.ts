@@ -29,6 +29,8 @@ import { adminRouter } from "./modules/admin/routes.js";
 import { notificationsRouter } from "./modules/notifications/routes.js";
 import { mailRouter } from "./modules/mail/routes.js";
 import { auditRouter } from "./modules/audit/routes.js";
+import { alertsRouter } from "./modules/alerts/routes.js";
+import { workOrdersRouter } from "./modules/work-orders/routes.js";
 
 export function createApp() {
   const app = express();
@@ -121,6 +123,8 @@ export function createApp() {
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/mail", mailRouter);
   app.use("/api/audit", auditRouter);
+  app.use("/api/alerts", alertsRouter);
+  app.use("/api/work-orders", workOrdersRouter);
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
 
