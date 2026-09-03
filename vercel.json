@@ -1,20 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "web/dist",
-
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
-      "includeFiles": "server/{dist,node_modules,prisma}/**"
+      "includeFiles": "server/node_modules/argon2/prebuilds/**"
     }
   },
-
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ],
-
-  "crons": [{ "path": "/api/cron/sweep", "schedule": "0 2 * * *" }]
+  "crons": [
+    {
+      "path": "/api/cron/sweep",
+      "schedule": "0 2 * * *"
+    }
+  ]
 }
