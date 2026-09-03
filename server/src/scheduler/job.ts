@@ -192,7 +192,9 @@ export async function runScheduledSweep(): Promise<SweepResult> {
           error: err instanceof Error ? err.message : String(err),
         },
       })
-      .catch((writeErr: unknown) => logger.error({ writeErr }, "could not record the failed sweep"));
+      .catch((writeErr: unknown) =>
+        logger.error({ writeErr }, "could not record the failed sweep")
+      );
     throw err;
   }
 }

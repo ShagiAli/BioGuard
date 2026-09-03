@@ -61,7 +61,7 @@ adminRouter.post("/reset-dispatches", requireAuth, requireRole("ADMIN"), async (
  * stopped, even though they cannot restart anything themselves.
  */
 adminRouter.get("/scheduler", requireAuth, requireRole("ADMIN", "MANAGER"), async (_req, res) => {
-  const { running, startedAt, lastError } = schedulerState();
+  const { running, startedAt, lastError, mode } = schedulerState();
 
   const [lastSweep, recent] = await Promise.all([
     prisma.sweepRun.findFirst({
@@ -79,6 +79,12 @@ adminRouter.get("/scheduler", requireAuth, requireRole("ADMIN", "MANAGER"), asyn
 
   res.json({
     running,
+    // Which shape this deployment is: a worker holding the schedule, or
+    // a platform cron calling in. It stays behind the role check with
+    // the rest of the detail — on a cron deployment it tells the reader
+    // that /api/cron/sweep exists, which is not something the
+    // unauthenticated health endpoint should be volunteering.
+    mode,
     startedAt,
     lastError,
     freshness,

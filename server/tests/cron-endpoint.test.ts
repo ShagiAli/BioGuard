@@ -57,10 +57,7 @@ describe("cron sweep endpoint", () => {
       expect(wrong).toHaveLength(SECRET.length);
 
       const app = await appFor(cronMode);
-      await request(app)
-        .get("/api/cron/sweep")
-        .set("authorization", `Bearer ${wrong}`)
-        .expect(401);
+      await request(app).get("/api/cron/sweep").set("authorization", `Bearer ${wrong}`).expect(401);
     });
 
     it("refuses a secret of a different length without erroring", async () => {
@@ -68,10 +65,7 @@ describe("cron sweep endpoint", () => {
       // escaped, this would be a 500 and the response would tell an
       // attacker the length was wrong rather than the value.
       const app = await appFor(cronMode);
-      await request(app)
-        .get("/api/cron/sweep")
-        .set("authorization", "Bearer short")
-        .expect(401);
+      await request(app).get("/api/cron/sweep").set("authorization", "Bearer short").expect(401);
     });
 
     it("refuses the bare secret without the Bearer scheme", async () => {

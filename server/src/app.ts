@@ -108,7 +108,7 @@ export function createApp() {
   app.get("/api/health", async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
 
-    const { running, startedAt, mode } = schedulerState();
+    const { running, startedAt } = schedulerState();
     const lastSweep = await prisma.sweepRun.findFirst({
       where: { trigger: "SCHEDULED", error: null },
       orderBy: { startedAt: "desc" },
@@ -119,7 +119,7 @@ export function createApp() {
     res.json({
       status: "ok",
       time: new Date().toISOString(),
-      scheduler: { healthy: running && freshness !== "stale", mode },
+      scheduler: { healthy: running && freshness !== "stale" },
     });
   });
 

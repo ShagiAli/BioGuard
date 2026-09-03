@@ -84,7 +84,10 @@ export class PostgresRateLimitStore implements Store {
        * a store that cannot be read is a store whose requests were
        * going to fail anyway.
        */
-      logger.error({ err, prefix: this.keyPrefix }, "rate limit store unavailable — allowing request");
+      logger.error(
+        { err, prefix: this.keyPrefix },
+        "rate limit store unavailable — allowing request"
+      );
       return { totalHits: 1, resetTime: expires };
     }
   }
