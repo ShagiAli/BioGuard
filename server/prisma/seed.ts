@@ -80,32 +80,48 @@ const DEPARTMENTS = [
 async function main() {
   console.log(`Seeding ${HOSPITAL}…`);
 
-  await prisma.$transaction([
-    prisma.auditLog.deleteMany(),
-    // Stale sweep rows would make a freshly reset demo report a
-    // healthy cron that has never actually run.
-    prisma.sweepRun.deleteMany(),
-    prisma.notification.deleteMany(),
-    prisma.notificationDispatch.deleteMany(),
-    // Work orders reference alerts, and alerts reference the users and
-    // equipment deleted below.
-    prisma.workOrder.deleteMany(),
-    prisma.alert.deleteMany(),
-    // Mail is addressed by email string, not by foreign key, so it
-    // survives the user rows being deleted. Without this, reminders
-    // from the previous seed reappear in the new engineers' mailboxes.
-    prisma.sentEmail.deleteMany(),
-    prisma.maintenanceRecord.deleteMany(),
-    prisma.equipment.deleteMany(),
-    prisma.session.deleteMany(),
-    prisma.passwordResetToken.deleteMany(),
-    prisma.user.deleteMany(),
-    prisma.room.deleteMany(),
-    prisma.building.deleteMany(),
-    prisma.department.deleteMany(),
-    prisma.equipmentCategory.deleteMany(),
-    prisma.manufacturer.deleteMany(),
-  ]);
+  /**
+   * The reset, as one transaction so a half-cleared database is never a
+   * state anybody sees.
+   *
+   * The timeout is raised well above Prisma's 5s default because this is
+   * seventeen statements and therefore seventeen round trips. Against
+   * localhost that is milliseconds; against a managed database on
+   * another continent it is seconds, and the default expires mid-way —
+   * P2028, with every statement reported as a separate failure. The
+   * work has not grown, only the distance, so the honest fix is a limit
+   * that reflects how far away the database might be rather than
+   * splitting a reset that ought to be atomic.
+   */
+  await prisma.$transaction(
+    [
+      prisma.auditLog.deleteMany(),
+      // Stale sweep rows would make a freshly reset demo report a
+      // healthy cron that has never actually run.
+      prisma.sweepRun.deleteMany(),
+      prisma.notification.deleteMany(),
+      prisma.notificationDispatch.deleteMany(),
+      // Work orders reference alerts, and alerts reference the users and
+      // equipment deleted below.
+      prisma.workOrder.deleteMany(),
+      prisma.alert.deleteMany(),
+      // Mail is addressed by email string, not by foreign key, so it
+      // survives the user rows being deleted. Without this, reminders
+      // from the previous seed reappear in the new engineers' mailboxes.
+      prisma.sentEmail.deleteMany(),
+      prisma.maintenanceRecord.deleteMany(),
+      prisma.equipment.deleteMany(),
+      prisma.session.deleteMany(),
+      prisma.passwordResetToken.deleteMany(),
+      prisma.user.deleteMany(),
+      prisma.room.deleteMany(),
+      prisma.building.deleteMany(),
+      prisma.department.deleteMany(),
+      prisma.equipmentCategory.deleteMany(),
+      prisma.manufacturer.deleteMany(),
+    ],
+    { maxWait: 10_000, timeout: 30_000 }
+  );
 
   const buildings = new Map<string, string>();
   for (const name of ["A Block", "B Block", "C Block"]) {

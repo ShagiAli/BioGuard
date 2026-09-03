@@ -2,9 +2,10 @@
   "name": "bioguard",
   "version": "1.0.0",
   "private": true,
-  "description": "Build orchestration for the Vercel deployment. The application itself lives in web/ and server/, each with its own package.json and lockfile — this file deliberately declares no dependencies, so the Docker build in the root Dockerfile is unaffected by its existence.",
+  "type": "module",
+  "description": "Build orchestration for the Vercel deployment. The application itself lives in web/ and server/, each with its own package.json and lockfile — this file deliberately declares no dependencies, so the Docker build in the root Dockerfile is unaffected by its existence. \"type\": \"module\" is load-bearing: it is the nearest package.json to api/, so it decides whether Vercel compiles the function as ESM or CommonJS, and the server build it imports is ESM.",
   "scripts": {
     "typecheck": "node server/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "vercel-build": "npm --prefix server ci && npm --prefix web ci && npm --prefix server run prisma:generate && npm --prefix server run build && npm --prefix web run build && npm --prefix server run db:deploy"
+    "vercel-build": "npm --prefix server ci --include=dev && npm --prefix web ci --include=dev && npm --prefix server run prisma:generate && npm --prefix server run build && npm --prefix web run build"
   }
 }
