@@ -22,6 +22,16 @@ export default defineConfig({
     // baking one into an image would be worse than the inconvenience.
     // The commands that genuinely need it (migrate, seed) run at
     // container start, where it is set.
-    url: process.env.DATABASE_URL,
+    //
+    // MIGRATE_DATABASE_URL exists because the CLI and the application
+    // want different connections on a serverless deployment. Migrate
+    // takes a session-scoped advisory lock; through a transaction
+    // pooler the statement after it can land on a different backend, so
+    // the lock is never seen again and the command hangs rather than
+    // failing. Point this at a session-mode or direct connection and
+    // leave DATABASE_URL on the pooler the application wants. Prisma
+    // solved this with `directUrl` before 7, which this config format
+    // no longer accepts.
+    url: process.env.MIGRATE_DATABASE_URL ?? process.env.DATABASE_URL,
   },
 });

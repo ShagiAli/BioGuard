@@ -247,10 +247,40 @@ running the sweep against a real provider would send dozens of messages
 to invalid recipients — a fast way to have an account suspended for
 bounce rate.
 
+### Migrations do not run in the build
+
+They used to, and it was wrong three times over.
+
+Prisma Migrate takes a session-scoped advisory lock. Through a
+transaction pooler the statement after it can land on a different
+backend, which never sees that lock, so `migrate deploy` waits rather
+than failing — a build that hangs until the platform kills it. Prisma
+handled this with `directUrl` before version 7; that config format no
+longer accepts one, so `prisma.config.ts` reads `MIGRATE_DATABASE_URL`
+when set and falls back to `DATABASE_URL`.
+
+It also made every deploy depend on the database being awake. A free
+Supabase project pauses after 7 days, so the first deploy after a quiet
+week would fail in the build rather than in the part that needs a
+database.
+
+And preview deployments run the same build. Pointed at the one database
+this project has, a preview branch would migrate production.
+
+So migrations are a deliberate step you run, below, against a session-mode
+or direct connection. `vercel-build` now only installs, generates,
+compiles and bundles — no network, nothing to hang on.
+
 ### Steps
 
-1. Create or resume a Supabase project. Copy the **Transaction pooler**
-   connection string and put the database password into it.
+1. Create or resume a Supabase project. From Settings → Database you
+   want **two** connection strings, and they are not interchangeable:
+   - **Transaction pooler** (port 6543) — the application's
+     `DATABASE_URL`. Right for many short-lived functions.
+   - **Session pooler** (port 5432 on the pooler host) — for migrations
+     and seeding. Session mode holds one backend for the connection,
+     which is what the advisory lock needs. The direct connection works
+     too but is IPv6-only on the free tier.
 2. Import the repository on Vercel. Leave the Root Directory at the
    repository root — `vercel.json` drives the build.
 3. Set the environment variables above. Generate the secrets with
@@ -258,12 +288,27 @@ bounce rate.
    and
    `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 4. Deploy. `vercel-build` installs both packages, generates the Prisma
-   client, builds the API and the frontend, and runs
-   `prisma migrate deploy` — so migrations apply as part of the build.
-5. Seed once, from a machine with the same `DATABASE_URL`:
+   client and builds the API and the frontend. It touches no database,
+   so it either compiles or it does not.
+5. Apply the schema, from your own machine, with `server/.env` pointing
+   at the **session** connection:
+
+   ```bash
+   npm --prefix server run db:deploy
+   ```
+
+   Or set `MIGRATE_DATABASE_URL` to the session string and leave
+   `DATABASE_URL` on the pooler, which is the arrangement that survives
+   having both in one file.
+
+6. Seed once, against the same connection:
    `npm --prefix server exec -- prisma db seed`. It prints the
    passwords — save them.
-6. Open the URL and sign in.
+7. Open the URL and sign in.
+
+Re-run step 5 after any deploy that carries a new migration. It is
+idempotent: a schema already at the latest migration reports that it has
+nothing to do.
 
 ### Verify the cron, once, by hand
 
