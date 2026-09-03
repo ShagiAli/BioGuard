@@ -7,3 +7,6 @@ uploads/
 *.log
 cookies.txt
 /package-lock.json
+
+# Vercel CLI state
+.vercel

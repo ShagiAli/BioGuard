@@ -34,6 +34,36 @@ const schema = z.object({
   // behind the proxy's address, too high and clients can spoof their
   // own address through X-Forwarded-For. Render behind Cloudflare is 3.
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
+
+  /**
+   * How the nightly sweep gets run.
+   *
+   * "worker" is a long-lived process holding a pg-boss worker, which is
+   * what the Docker image runs. "cron" is for platforms that freeze a
+   * function the moment it responds — there is nothing there to poll a
+   * queue, so the platform's own scheduler calls /api/cron/sweep and
+   * that endpoint runs exactly what the worker would have.
+   */
+  SCHEDULER_MODE: z.enum(["worker", "cron"]).default("worker"),
+  /** Shared secret the platform scheduler presents. Required in cron mode. */
+  CRON_SECRET: z.string().min(16).optional(),
+  /**
+   * Where rate-limit counters live. The in-memory default is correct
+   * for one process and actively misleading for several: see
+   * lib/rateLimitStore.ts.
+   */
+  RATE_LIMIT_STORE: z.enum(["memory", "postgres"]).default("memory"),
+}).superRefine((cfg, ctx) => {
+  // An unauthenticated endpoint that runs the sweep is not something to
+  // leave open because a variable was forgotten. Refusing to boot is the
+  // only version of this check that cannot be ignored.
+  if (cfg.SCHEDULER_MODE === "cron" && !cfg.CRON_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CRON_SECRET"],
+      message: "CRON_SECRET is required when SCHEDULER_MODE=cron",
+    });
+  }
 });
 
 const parsed = schema.safeParse(process.env);

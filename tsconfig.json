@@ -1,0 +1,18 @@
+{
+  // Covers only the Vercel function at api/. The application's own
+  // TypeScript configuration lives in web/ and server/ and is untouched
+  // by this file — neither extends it, and `include` is deliberately
+  // narrow so a root-level `tsc` cannot start typechecking the packages
+  // with the wrong options.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowJs": false
+  },
+  "include": ["api/**/*.ts"]
+}

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
+import { limiterStore } from "../../lib/rateLimitStore.js";
 import { z } from "zod";
 import QRCode from "qrcode";
 import { prisma } from "../../lib/prisma.js";
@@ -227,6 +228,7 @@ const scanLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  store: limiterStore("qr-scan"),
 });
 
 equipmentRouter.get("/public/:token", scanLimiter, async (req, res) => {
