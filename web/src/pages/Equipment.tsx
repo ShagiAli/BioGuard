@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
@@ -42,9 +42,35 @@ export function Equipment() {
    * something you can send to a colleague.
    */
   const [params, setParams] = useSearchParams();
-  const [search, setSearch] = useState(params.get("q") ?? "");
+  const urlQ = params.get("q") ?? "";
+  const [search, setSearch] = useState(urlQ);
+
+  /**
+   * The last term this component put in the URL. It tells an external
+   * navigation apart from our own debounced write, which is the
+   * difference between clearing the box and eating a keystroke.
+   */
+  const lastWritten = useRef(urlQ);
 
   const page = Number(params.get("page") ?? 1);
+
+  /**
+   * The URL is the source of truth, so the box has to follow it when it
+   * changes underneath us. The sidebar's Equipment link, the back button
+   * and a dashboard drill-down all land on this route without
+   * unmounting, leaving `search` holding a term the URL no longer has —
+   * and the debounce below would write that stale term straight back, so
+   * the link looked like it did nothing.
+   *
+   * Only external changes count. Our own write moves `urlQ` too, and
+   * echoing that back would clobber whatever was typed in the moment
+   * between the timeout firing and the URL committing.
+   */
+  useEffect(() => {
+    if (urlQ === lastWritten.current) return;
+    lastWritten.current = urlQ;
+    setSearch(urlQ);
+  }, [urlQ]);
 
   /**
    * Debounced, so a query does not fire on every keystroke.
@@ -74,6 +100,7 @@ export function Equipment() {
       if (search) next.set("q", search);
       else next.delete("q");
       next.delete("page");
+      lastWritten.current = search;
       setParams(next, { replace: true });
     }, 300);
     return () => clearTimeout(timer);
