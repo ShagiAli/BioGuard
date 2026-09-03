@@ -518,3 +518,26 @@ model WorkOrderPart {
 
   @@index([workOrderId, status])
 }
+
+// ------------------------------------------------------- rate limiting
+
+/// One rate-limit window, shared across processes.
+///
+/// express-rate-limit defaults to an in-memory store, which is correct
+/// for exactly one long-lived process. On a serverless platform every
+/// concurrent invocation gets its own memory, so the login and password
+/// reset limits SECURITY.md documents would divide by the number of
+/// warm instances and protect nobody — while still reporting healthy
+/// numbers, which is the worst way for a control to fail.
+///
+/// Keyed by whatever the limiter's keyGenerator produces (client IP, or
+/// an account identifier), prefixed per limiter so the five of them
+/// cannot collide. Expired rows are harmless and swept lazily; see
+/// lib/rateLimitStore.ts.
+model RateLimitHit {
+  key       String   @id
+  hits      Int      @default(0)
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}

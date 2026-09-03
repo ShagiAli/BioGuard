@@ -7,7 +7,12 @@
   // layout is preserved in dist: dist/src/index.js, dist/prisma/seed.js.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "sourceMap": true
+    "sourceMap": true,
+    // Emitted so the Vercel function at ../api/index.ts can be
+    // typechecked against the built output it imports. Without these it
+    // sees an untyped module and the entry point — the one file the
+    // whole serverless deployment hangs from — goes unchecked.
+    "declaration": true
   },
   "include": ["src/**/*.ts", "prisma/seed.ts"],
   "exclude": ["tests", "dist", "node_modules"]

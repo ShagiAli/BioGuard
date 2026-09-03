@@ -145,6 +145,60 @@ export async function runSweepRange(from: Date, to: Date): Promise<SweepResult[]
   return results;
 }
 
+/**
+ * The nightly run, and the only thing that writes SweepRun.
+ *
+ * The admin simulation calls runSweep directly and deliberately does
+ * not record: it would add a row per simulated day and make a hand-run
+ * look like a healthy cron.
+ *
+ * A failure is written before being rethrown, so the caller still
+ * retries and the reason survives. That row is a convenience, not the
+ * mechanism — if the process dies outright nothing gets written, which
+ * is exactly why staleness rather than error-reporting is what the
+ * health check reads.
+ *
+ * Extracted from the pg-boss worker so the two ways of triggering a
+ * sweep cannot drift: the worker below runs this, and on a serverless
+ * deployment the platform's scheduler reaches the same function through
+ * /api/cron/sweep. A reminder ladder that behaves differently depending
+ * on which host you deployed to would be worse than either behaviour.
+ */
+export async function runScheduledSweep(): Promise<SweepResult> {
+  const startedAt = new Date();
+  const ranFor = toDay(startedAt);
+
+  try {
+    const result = await runSweep(startedAt);
+    await prisma.sweepRun.create({
+      data: {
+        ranFor,
+        scanned: result.scanned,
+        sent: result.sent,
+        startedAt,
+        finishedAt: new Date(),
+      },
+    });
+    return result;
+  } catch (err) {
+    await prisma.sweepRun
+      .create({
+        data: {
+          ranFor,
+          scanned: 0,
+          sent: 0,
+          startedAt,
+          finishedAt: new Date(),
+          error: err instanceof Error ? err.message : String(err),
+        },
+      })
+      .catch((writeErr: unknown) =>
+        logger.error({ writeErr }, "could not record the failed sweep")
+      );
+    throw err;
+  }
+}
+
 export async function startScheduler(): Promise<PgBoss> {
   const boss = new PgBoss(env.DATABASE_URL);
   boss.on("error", (err) => logger.error({ err }, "pg-boss error"));
@@ -154,52 +208,7 @@ export async function startScheduler(): Promise<PgBoss> {
   // reference them. Idempotent, so it is safe on every boot.
   await boss.createQueue(QUEUE);
 
-  /**
-   * The nightly run, and the only thing that writes SweepRun.
-   *
-   * The admin simulation calls runSweep directly and deliberately does
-   * not record: it would add a row per simulated day and make a hand-run
-   * look like a healthy cron.
-   *
-   * A failure is written before being rethrown, so pg-boss still retries
-   * and the reason survives. That row is a convenience, not the
-   * mechanism — if the process dies outright nothing gets written, which
-   * is exactly why staleness rather than error-reporting is what the
-   * health check reads.
-   */
-  await boss.work(QUEUE, async () => {
-    const startedAt = new Date();
-    const ranFor = toDay(startedAt);
-
-    try {
-      const result = await runSweep(startedAt);
-      await prisma.sweepRun.create({
-        data: {
-          ranFor,
-          scanned: result.scanned,
-          sent: result.sent,
-          startedAt,
-          finishedAt: new Date(),
-        },
-      });
-    } catch (err) {
-      await prisma.sweepRun
-        .create({
-          data: {
-            ranFor,
-            scanned: 0,
-            sent: 0,
-            startedAt,
-            finishedAt: new Date(),
-            error: err instanceof Error ? err.message : String(err),
-          },
-        })
-        .catch((writeErr: unknown) =>
-          logger.error({ writeErr }, "could not record the failed sweep")
-        );
-      throw err;
-    }
-  });
+  await boss.work(QUEUE, runScheduledSweep);
 
   // 02:00 daily. pg-boss deduplicates the schedule across instances, so
   // running several API replicas does not mean several sweeps.

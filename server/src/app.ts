@@ -20,8 +20,9 @@ import fs from "node:fs";
 import { env, isProd } from "./env.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
+import { limiterStore } from "./lib/rateLimitStore.js";
 import { loadSession } from "./middleware/auth.js";
-import { schedulerState, sweepFreshness } from "./scheduler/status.js";
+import { markSchedulerCron, schedulerState, sweepFreshness } from "./scheduler/status.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { equipmentRouter } from "./modules/equipment/routes.js";
 import { maintenanceRouter } from "./modules/maintenance/routes.js";
@@ -31,6 +32,7 @@ import { mailRouter } from "./modules/mail/routes.js";
 import { auditRouter } from "./modules/audit/routes.js";
 import { alertsRouter } from "./modules/alerts/routes.js";
 import { workOrdersRouter } from "./modules/work-orders/routes.js";
+import { cronRouter } from "./modules/cron/routes.js";
 
 export function createApp() {
   const app = express();
@@ -84,6 +86,7 @@ export function createApp() {
       limit: env.NODE_ENV === "test" ? 100_000 : 300,
       standardHeaders: true,
       legacyHeaders: false,
+      store: limiterStore("global"),
     })
   );
 
@@ -129,6 +132,17 @@ export function createApp() {
   app.use("/api/audit", auditRouter);
   app.use("/api/alerts", alertsRouter);
   app.use("/api/work-orders", workOrdersRouter);
+
+  /**
+   * Only in cron mode, and mounted after the routers above so it cannot
+   * shadow anything. On a deployment whose worker owns the schedule
+   * this route simply is not there — an unauthenticated trigger for the
+   * nightly sweep is not worth carrying on a host that has no use for it.
+   */
+  if (env.SCHEDULER_MODE === "cron") {
+    markSchedulerCron();
+    app.use("/api/cron", cronRouter);
+  }
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "Not found." }));
 

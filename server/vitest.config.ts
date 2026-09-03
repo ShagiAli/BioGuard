@@ -16,6 +16,7 @@ export default defineConfig({
             "tests/guard.test.ts",
             "tests/scheduler-status.test.ts",
             "tests/alert-workflow.test.ts",
+            "tests/cron-endpoint.test.ts",
           ],
     testTimeout: 30_000,
     hookTimeout: 60_000,

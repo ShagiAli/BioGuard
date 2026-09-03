@@ -1,5 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
+import { limiterStore } from "../../lib/rateLimitStore.js";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { env, isProd } from "../../env.js";
@@ -41,6 +42,7 @@ const loginIpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: TOO_MANY,
+  store: limiterStore("login-ip"),
 });
 
 const loginAccountLimiter = rateLimit({
@@ -50,6 +52,7 @@ const loginAccountLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => String(req.body?.email ?? "unknown").toLowerCase(),
   message: TOO_MANY,
+  store: limiterStore("login-account"),
 });
 
 const resetLimiter = rateLimit({
@@ -58,6 +61,7 @@ const resetLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: TOO_MANY,
+  store: limiterStore("password-reset"),
 });
 
 function setSessionCookie(res: import("express").Response, token: string) {
