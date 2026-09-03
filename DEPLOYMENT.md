@@ -297,9 +297,18 @@ compiles and bundles — no network, nothing to hang on.
    npm --prefix server run db:deploy
    ```
 
-   Or set `MIGRATE_DATABASE_URL` to the session string and leave
-   `DATABASE_URL` on the pooler, which is the arrangement that survives
-   having both in one file.
+   Point `DATABASE_URL` itself at the session string for these two
+   commands, and put it back afterwards. Do **not** set only
+   `MIGRATE_DATABASE_URL` and leave `DATABASE_URL` on your local
+   database: the CLI reads the first, but the seed goes through the
+   application's own client in `src/lib/prisma.ts`, which reads
+   `DATABASE_URL` and nothing else. The migration would land on
+   Supabase and the seed would truncate whatever `DATABASE_URL` points
+   at, because the seed clears every table before it writes.
+
+   `MIGRATE_DATABASE_URL` is for the deployed application, where
+   `DATABASE_URL` has to stay on the transaction pooler. It is the
+   wrong tool for running these two commands by hand.
 
 6. Seed once, against the same connection:
 
