@@ -302,8 +302,15 @@ compiles and bundles — no network, nothing to hang on.
    having both in one file.
 
 6. Seed once, against the same connection:
-   `npm --prefix server exec -- prisma db seed`. It prints the
-   passwords — save them.
+
+   ```bash
+   npm --prefix server run db:seed
+   ```
+
+   It prints the passwords — save them. Note `run`, not `exec`:
+   `--prefix` tells npm where the package is, not where to run the
+   command, so `npm --prefix server exec` would start the CLI in the
+   repository root and fail to find the schema.
 7. Open the URL and sign in.
 
 Re-run step 5 after any deploy that carries a new migration. It is
