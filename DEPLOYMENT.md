@@ -271,6 +271,40 @@ So migrations are a deliberate step you run, below, against a session-mode
 or direct connection. `vercel-build` now only installs, generates,
 compiles and bundles — no network, nothing to hang on.
 
+### Environments, and which branch is production
+
+Vercel deploys Production from your **default branch**. If the work sits
+on a feature branch, either merge it first or open
+Settings → Environments → Production, set **Branch Tracking** to that
+branch, and save. That setting used to live under Settings → Git and has
+moved; guides written before the change send you to a screen where it no
+longer is. From the CLI, `vercel --prod` promotes any branch without
+touching either.
+
+Settle this before deploying, because three separate things hang off it.
+
+**Cron only runs on Production.** A preview deployment never fires the
+nightly sweep, however correct `vercel.json` is. A deployment that looks
+healthy and quietly never reminds anyone is the exact failure this
+application exists to prevent.
+
+**Previews are gated.** Deployment Protection redirects anything without
+a Vercel login to an SSO page, so an external check — or anyone you want
+to show the demo to — gets a login form rather than the app.
+Settings → Deployment Protection decides whether that applies to
+Production as well; a public demo wants it on previews only.
+
+**Environment variables are scoped per environment.** Variables set for
+Production alone are absent on a preview, and the application refuses to
+boot without them. That failure is indistinguishable from a crash from
+the outside: the function exits before it serves anything, and the
+platform reports an invocation failure with no message. Scope them to
+**All Environments** unless you have a reason not to.
+
+One quirk to know rather than discover: a project's *first* deployment
+is always a production one, whatever branch it came from. Everything
+after follows the usual rules.
+
 ### Steps
 
 1. Create or resume a Supabase project. From Settings → Database you
@@ -282,15 +316,25 @@ compiles and bundles — no network, nothing to hang on.
      which is what the advisory lock needs. The direct connection works
      too but is IPv6-only on the free tier.
 2. Import the repository on Vercel. Leave the Root Directory at the
-   repository root — `vercel.json` drives the build.
-3. Set the environment variables above. Generate the secrets with
+   repository root — `vercel.json` drives the build, and a framework
+   preset or an overridden build command will fight it.
+3. Point Production at the right branch, and scope the environment
+   variables to match — see the section above. Doing this after the
+   first deploy rather than before is how you end up debugging a
+   preview.
+4. Set the environment variables above. Generate the secrets with
    `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`
    and
    `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
-4. Deploy. `vercel-build` installs both packages, generates the Prisma
+5. Match the function region to the database. Settings → Functions →
+   Function Region, set to the region chosen in step 1. The default is
+   US East; a function in Frankfurt talking to a database in Mumbai puts
+   an intercontinental round trip in every query, and the application
+   feels broken when it is only far away.
+6. Deploy. `vercel-build` installs both packages, generates the Prisma
    client and builds the API and the frontend. It touches no database,
    so it either compiles or it does not.
-5. Apply the schema, from your own machine, with `server/.env` pointing
+7. Apply the schema, from your own machine, with `server/.env` pointing
    at the **session** connection:
 
    ```bash
@@ -310,7 +354,7 @@ compiles and bundles — no network, nothing to hang on.
    `DATABASE_URL` has to stay on the transaction pooler. It is the
    wrong tool for running these two commands by hand.
 
-6. Seed once, against the same connection:
+8. Seed once, against the same connection:
 
    ```bash
    npm --prefix server run db:seed
@@ -320,7 +364,14 @@ compiles and bundles — no network, nothing to hang on.
    `--prefix` tells npm where the package is, not where to run the
    command, so `npm --prefix server exec` would start the CLI in the
    repository root and fail to find the schema.
-7. Open the URL and sign in.
+9. Correct `APP_URL` now that the real domain exists, and redeploy. It
+   is a chicken-and-egg: the application refuses to boot without it, so
+   it must be set before the first deploy, but Vercel does not name the
+   domain until after. A wrong value breaks QR codes, password reset
+   links and email deep-links — not login, so it is easy to miss. Adding
+   a variable restarts nothing on its own: redeploy, or the old value
+   stays live.
+10. Open the URL and sign in.
 
 Re-run step 5 after any deploy that carries a new migration. It is
 idempotent: a schema already at the latest migration reports that it has
@@ -338,11 +389,20 @@ tell you; you have to look.
 curl -s -H "Authorization: Bearer $CRON_SECRET" https://your-app.vercel.app/api/cron/sweep
 ```
 
+On PowerShell that is `curl.exe`, not `curl`, which is an alias for
+`Invoke-WebRequest` and has no `-H` or `-i` — it silently prompts for a
+`Uri` instead of doing anything.
+
 A `200` with a scan count means the endpoint, the secret and the
 database all work. After that `/api/health` reports `scheduler.healthy`
 from the freshness of the last recorded sweep, as it does everywhere
 else. Vercel lists invocations under the project's Cron Jobs tab — check
 it the morning after the first deploy.
+
+Run it twice, and the second run should report `sent: 0` against the
+same scanned count. That is `NotificationDispatch` refusing the
+duplicates, and it is worth seeing once: it is the whole reason the
+sweep is safe to retry.
 
 ### Known limits of this shape
 
