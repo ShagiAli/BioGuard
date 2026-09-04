@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type User } from "./lib/api";
 import { Button } from "./components/ui";
+import { Logo } from "./components/Logo";
 
 interface AuthValue {
   user: User | null;
@@ -77,8 +78,11 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6">
-          <div className="font-mono text-2xl font-semibold tracking-tight text-teal-800">
-            BioGuard
+          <div className="flex items-center gap-2.5">
+            <Logo className="h-8 w-8 text-teal-800" />
+            <div className="font-mono text-2xl font-semibold tracking-tight text-teal-800">
+              BioGuard
+            </div>
           </div>
           <p className="mt-1 text-sm text-slate-500">
             Biomedical equipment monitoring and maintenance

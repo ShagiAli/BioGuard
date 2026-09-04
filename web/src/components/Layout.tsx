@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Logo } from "./Logo";
 import {
   AlertTriangle,
   Bell,
@@ -71,8 +72,11 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen bg-slate-50 text-slate-900">
       <aside className="hidden w-56 shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
         <div className="border-b border-slate-200 px-5 py-5">
-          <div className="font-mono text-lg font-semibold tracking-tight text-teal-800">
-            BioGuard
+          <div className="flex items-center gap-2">
+            <Logo className="h-6 w-6 text-teal-800" />
+            <div className="font-mono text-lg font-semibold tracking-tight text-teal-800">
+              BioGuard
+            </div>
           </div>
           <div className="mt-1 text-xs leading-snug text-slate-500">
             Northfield Teaching Hospital
