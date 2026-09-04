@@ -151,6 +151,7 @@ model User {
   notifications     Notification[]
   auditEntries      AuditLog[]
   notes             Note[]              @relation("NoteAuthor")
+  savedViews        SavedView[]         @relation("SavedViewOwner")
 
   raisedAlerts       Alert[]     @relation("AlertRaiser")
   acknowledgedAlerts Alert[]     @relation("AlertAcknowledger")
@@ -497,6 +498,35 @@ model WorkOrder {
   @@index([status, priority])
   @@index([engineerId, status])
   @@index([equipmentId])
+}
+
+/// A named set of list filters, kept by one person for themselves.
+///
+/// The query is stored exactly as the URL held it, because that is
+/// already the application's description of a filtered list — the
+/// equipment page has put its filters in the address bar since it was
+/// written. Replaying one is therefore no more powerful than typing the
+/// same URL: every list endpoint parses it with a strict schema and
+/// rejects anything it does not recognise.
+///
+/// Private to their owner. A shared view would need a story about who
+/// may see which departments, and the scoping rules already answer that
+/// per request rather than per saved string.
+model SavedView {
+  id       String @id @default(uuid(7)) @db.Uuid
+  name     String
+  /// Which list it belongs to: "equipment", "alerts", "work-orders".
+  resource String
+  /// The query string, without the leading question mark.
+  query    String
+
+  ownerId String @db.Uuid
+  owner   User   @relation("SavedViewOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([ownerId, resource, name])
+  @@index([ownerId, resource])
 }
 
 /// A comment on an alert or a work order.

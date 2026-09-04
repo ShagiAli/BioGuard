@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth";
+import { SavedViews } from "../components/SavedViews";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
 import {
@@ -273,6 +274,12 @@ export function Equipment() {
             </option>
           ))}
         </select>
+
+        <SavedViews
+          resource="equipment"
+          currentQuery={params.toString()}
+          onApply={(query) => setParams(new URLSearchParams(query))}
+        />
 
         <ExportButton href={exportHref} />
       </div>

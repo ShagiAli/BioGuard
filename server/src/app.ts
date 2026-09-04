@@ -32,6 +32,7 @@ import { mailRouter } from "./modules/mail/routes.js";
 import { auditRouter } from "./modules/audit/routes.js";
 import { alertsRouter } from "./modules/alerts/routes.js";
 import { workOrdersRouter } from "./modules/work-orders/routes.js";
+import { viewsRouter } from "./modules/views/routes.js";
 import { cronRouter } from "./modules/cron/routes.js";
 
 export function createApp() {
@@ -132,6 +133,7 @@ export function createApp() {
   app.use("/api/audit", auditRouter);
   app.use("/api/alerts", alertsRouter);
   app.use("/api/work-orders", workOrdersRouter);
+  app.use("/api/views", viewsRouter);
 
   /**
    * Only in cron mode, and mounted after the routers above so it cannot
