@@ -28,7 +28,7 @@ export function Logo({ className = "", label }: { className?: string; label?: st
       <path
         d="M19 32h6.6l3.6-8.6 5.4 16.2 3.4-7.6H45"
         fill="none"
-        stroke="#ffffff"
+        stroke="var(--logo-knockout, #ffffff)"
         strokeWidth="3.6"
         strokeLinecap="round"
         strokeLinejoin="round"

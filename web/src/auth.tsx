@@ -78,13 +78,14 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
       <div className="w-full max-w-sm">
         <div className="mb-6">
-          <div className="flex items-center gap-2.5">
-            <Logo className="h-8 w-8 text-teal-800" />
-            <div className="font-mono text-2xl font-semibold tracking-tight text-teal-800">
-              BioGuard
+          <div className="flex items-center gap-3">
+            <Logo className="h-10 w-10 text-brand-700" />
+            <div>
+              <div className="text-2xl font-semibold tracking-tight text-brand-800">BioGuard</div>
+              <div className="text-xs text-slate-500">Protecting care. Protecting life.</div>
             </div>
           </div>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-3 text-sm text-slate-500">
             Biomedical equipment monitoring and maintenance
           </p>
         </div>

@@ -1,5 +1,37 @@
 @import "tailwindcss";
 
+/**
+ * The brand scale, defined once.
+ *
+ * These are the teal the mark is drawn in, so `brand-700` is literally
+ * the logo's fill. Defining them here rather than reaching for
+ * `teal-700` across two hundred class names means the identity has one
+ * home: change these eleven values and the interface follows.
+ *
+ * The new design was drawn in blue. Every blue role maps onto this
+ * scale — sidebar to brand-950, primary action to brand-700, active
+ * navigation to brand-600 — so the screens keep their structure and the
+ * product keeps its colour.
+ *
+ * Priority colours are deliberately absent. Emergency red through low
+ * green encode clinical urgency rather than brand, and pulling them
+ * into a palette would make a fault list harder to scan, which is the
+ * one thing this interface cannot afford.
+ */
+@theme {
+  --color-brand-50: #f0fdfa;
+  --color-brand-100: #ccfbf1;
+  --color-brand-200: #99f6e4;
+  --color-brand-300: #5eead4;
+  --color-brand-400: #2dd4bf;
+  --color-brand-500: #14b8a6;
+  --color-brand-600: #0d9488;
+  --color-brand-700: #0f766e;
+  --color-brand-800: #115e59;
+  --color-brand-900: #134e4a;
+  --color-brand-950: #042f2e;
+}
+
 html,
 body,
 #root {
@@ -8,4 +40,14 @@ body,
 
 body {
   -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * The mark's pulse is a knockout: it stands for whatever surface sits
+ * behind the shield. White is right on every light ground in the
+ * application; the dark sidebar overrides it so the stroke never
+ * disappears into a shield of the same colour.
+ */
+:root {
+  --logo-knockout: #ffffff;
 }
