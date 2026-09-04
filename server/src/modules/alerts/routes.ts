@@ -8,7 +8,9 @@
  */
 import { Router } from "express";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
+import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { recordAudit } from "../../lib/audit.js";
 import { alertScope, equipmentScope, requireAuth, triagesAlerts } from "../../middleware/auth.js";
 import type { AlertStatus } from "@prisma/client";
@@ -134,6 +136,22 @@ alertsRouter.post("/", requireAuth, async (req, res) => {
 
 // --------------------------------------------------------------- read
 
+/**
+ * Priority sorts by the enum, which is declared most urgent first — so
+ * ascending puts emergencies at the top, which is what someone clicking
+ * "Priority" wants and the opposite of what the word suggests.
+ */
+const SORTABLE = ["priority", "status", "openedAt"] as const;
+
+const ALERT_ORDER: Record<
+  (typeof SORTABLE)[number],
+  (d: "asc" | "desc") => Prisma.AlertOrderByWithRelationInput
+> = {
+  priority: (d) => ({ priority: d }),
+  status: (d) => ({ status: d }),
+  openedAt: (d) => ({ openedAt: d }),
+};
+
 const listQuery = z
   .object({
     status: z
@@ -143,6 +161,8 @@ const listQuery = z
     open: z.enum(["true", "false"]).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    ...sortSchema(SORTABLE),
+    format: z.enum(["json", "csv"]).default("json"),
   })
   .strict()
   // Both write `status` into the same where clause, so one silently
@@ -160,7 +180,7 @@ alertsRouter.get("/", requireAuth, async (req, res) => {
       .json({ error: parsed.error.issues[0]?.message ?? "Unrecognised filter." });
   }
 
-  const { status, priority, open, page, pageSize } = parsed.data;
+  const { status, priority, open, page, pageSize, sort, dir, format } = parsed.data;
 
   const where = {
     ...alertScope(req.user!), // scope first, always
@@ -169,13 +189,46 @@ alertsRouter.get("/", requireAuth, async (req, res) => {
     ...(open === "true" ? { status: { notIn: FINISHED } } : {}),
   };
 
+  // Emergencies first, then oldest, so the queue reads as a work list
+  // rather than a stream.
+  const fallback = [{ priority: "asc" as const }, { openedAt: "asc" as const }];
+  const orderBy = orderByFrom(sort, dir, ALERT_ORDER, fallback) as
+    Prisma.AlertOrderByWithRelationInput | Prisma.AlertOrderByWithRelationInput[];
+
+  if (format === "csv") {
+    const all = (
+      await prisma.alert.findMany({
+        where,
+        orderBy,
+        take: EXPORT_ROW_LIMIT,
+        include: DETAIL_INCLUDE,
+      })
+    ).map(present);
+
+    return sendCsv(
+      res,
+      `alerts-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { header: "Alert", value: (r) => r.number },
+        { header: "Priority", value: (r) => r.priority },
+        { header: "Status", value: (r) => r.status },
+        { header: "Problem", value: (r) => r.description },
+        { header: "Equipment", value: (r) => r.equipment.name },
+        { header: "Asset no.", value: (r) => r.equipment.assetNo },
+        { header: "Department", value: (r) => r.equipment.department.name },
+        { header: "Reported", value: (r) => r.openedAt },
+        { header: "Reported by", value: (r) => r.raisedBy?.fullName ?? "" },
+        { header: "Assigned to", value: (r) => r.assignedTo?.fullName ?? "" },
+      ],
+      all
+    );
+  }
+
   const [total, rows] = await Promise.all([
     prisma.alert.count({ where }),
     prisma.alert.findMany({
       where,
-      // Emergencies first, then oldest, so the queue reads as a work list
-      // rather than a stream.
-      orderBy: [{ priority: "asc" }, { openedAt: "asc" }],
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: DETAIL_INCLUDE,

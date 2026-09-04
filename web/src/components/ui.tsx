@@ -304,6 +304,51 @@ export function SortableHeader({
 }
 
 /**
+ * "Sort by" for a list that is not a table.
+ *
+ * Equipment sorts from its column headings, which only works where
+ * there are headings to click. Alerts, work orders and activity are
+ * card lists, so the same choice becomes a select — the design shows
+ * both, and this is the half that fits a list with no columns.
+ *
+ * Each option carries its own direction, so a label can say what it
+ * means: "Most urgent first" rather than "priority, ascending", which
+ * is only obvious once you know the enum is declared worst-first.
+ */
+export function SortSelect({
+  options,
+  sort,
+  dir,
+  onSort,
+}: {
+  options: { label: string; column: string; dir: SortDirection }[];
+  sort: string | null;
+  dir: SortDirection;
+  onSort: (column: string, dir: SortDirection) => void;
+}) {
+  const current = options.find((o) => o.column === sort && o.dir === dir) ?? options[0];
+
+  return (
+    <label className="flex items-center gap-2 text-sm text-slate-500">
+      <span className="whitespace-nowrap">Sort by</span>
+      <select
+        value={current ? `${current.column}:${current.dir}` : ""}
+        onChange={(e) => {
+          const [column, next] = e.target.value.split(":");
+          if (column && next) onSort(column, next as SortDirection);
+        }}
+        className="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+      >
+        {options.map((o) => (
+          <option key={`${o.column}:${o.dir}`} value={`${o.column}:${o.dir}`}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+/**
  * Downloads the current list as CSV.
  *
  * A link rather than a fetch, so the browser owns the download and the

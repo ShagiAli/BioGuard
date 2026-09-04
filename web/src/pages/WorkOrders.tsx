@@ -22,7 +22,17 @@ import {
   WORK_ORDER_STATUS_LABELS,
   type WorkOrder,
 } from "../lib/api";
-import { Badge, Card, Empty, ErrorNote, Pager, Spinner } from "../components/ui";
+import {
+  Badge,
+  Card,
+  Empty,
+  ErrorNote,
+  ExportButton,
+  Pager,
+  SortSelect,
+  Spinner,
+  type SortDirection,
+} from "../components/ui";
 
 interface Feed {
   total: number;
@@ -35,12 +45,23 @@ export function WorkOrders() {
   const [params, setParams] = useSearchParams();
 
   const page = Number(params.get("page") ?? 1);
+  const pageSize = Number(params.get("pageSize") ?? 20);
+  const sort = params.get("sort");
+  const dir: SortDirection = params.get("dir") === "desc" ? "desc" : "asc";
+
+  const SORT_OPTIONS = [
+    { label: "Most urgent first", column: "priority", dir: "asc" as const },
+    { label: "Newest first", column: "createdAt", dir: "desc" as const },
+    { label: "Oldest first", column: "createdAt", dir: "asc" as const },
+    { label: "Engineer", column: "engineer", dir: "asc" as const },
+    { label: "Status", column: "status", dir: "asc" as const },
+  ];
   const archived = params.get("archived") === "true";
 
   const query = useQuery({
     queryKey: ["work-orders", params.toString()],
     queryFn: () =>
-      api.get<Feed>(`/api/work-orders?page=${page}&archived=${archived ? "true" : "false"}`),
+      api.get<Feed>(`/api/work-orders?${listQuery.toString()}`),
     placeholderData: keepPreviousData,
   });
 
@@ -50,6 +71,43 @@ export function WorkOrders() {
     q.delete("page");
     setParams(q);
   };
+
+  const listQuery = (() => {
+    const q = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+      archived: archived ? "true" : "false",
+    });
+    if (sort) {
+      q.set("sort", sort);
+      q.set("dir", dir);
+    }
+    return q;
+  })();
+
+  const setSort = (column: string, nextDir: SortDirection) => {
+    const next = new URLSearchParams(params);
+    next.set("sort", column);
+    next.set("dir", nextDir);
+    next.delete("page");
+    setParams(next);
+  };
+
+  const setPageSize = (size: number) => {
+    const next = new URLSearchParams(params);
+    next.set("pageSize", String(size));
+    next.delete("page");
+    setParams(next);
+  };
+
+  /** Same tab and order, without the paging. */
+  const exportHref = (() => {
+    const q = new URLSearchParams(listQuery);
+    q.delete("page");
+    q.delete("pageSize");
+    q.set("format", "csv");
+    return `/api/work-orders?${q.toString()}`;
+  })();
 
   const goToPage = (next: number) => {
     const q = new URLSearchParams(params);
@@ -77,7 +135,12 @@ export function WorkOrders() {
         </Tab>
       </div>
 
-      <Card className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <SortSelect options={SORT_OPTIONS} sort={sort} dir={dir} onSort={setSort} />
+        <ExportButton href={exportHref} />
+      </div>
+
+      <Card className="mt-3">
         {query.isLoading ? (
           <Spinner label="Loading work orders" />
         ) : query.isError ? (
@@ -140,7 +203,16 @@ export function WorkOrders() {
           </ul>
         )}
 
-        {query.data && <Pager page={page} totalPages={totalPages} onChange={goToPage} />}
+        {query.data && (
+          <Pager
+            page={page}
+            totalPages={totalPages}
+            onChange={goToPage}
+            total={query.data.total}
+            pageSize={query.data.pageSize}
+            onPageSize={setPageSize}
+          />
+        )}
       </Card>
     </div>
   );

@@ -27,7 +27,17 @@ import {
   type Alert,
   type AlertStatus,
 } from "../lib/api";
-import { Badge, Card, Empty, ErrorNote, Pager, Spinner } from "../components/ui";
+import {
+  Badge,
+  Card,
+  Empty,
+  ErrorNote,
+  ExportButton,
+  Pager,
+  SortSelect,
+  Spinner,
+  type SortDirection,
+} from "../components/ui";
 
 interface Feed {
   total: number;
@@ -71,6 +81,22 @@ export function Alerts() {
   const [params, setParams] = useSearchParams();
 
   const page = Number(params.get("page") ?? 1);
+  const pageSize = Number(params.get("pageSize") ?? 20);
+  const sort = params.get("sort");
+  const dir: SortDirection = params.get("dir") === "desc" ? "desc" : "asc";
+
+  /**
+   * Priority is declared most-urgent-first in the schema, so ascending
+   * puts emergencies at the top. The labels say what each option does
+   * rather than which way the enum runs.
+   */
+  const SORT_OPTIONS = [
+    { label: "Most urgent first", column: "priority", dir: "asc" as const },
+    { label: "Least urgent first", column: "priority", dir: "desc" as const },
+    { label: "Newest first", column: "openedAt", dir: "desc" as const },
+    { label: "Oldest first", column: "openedAt", dir: "asc" as const },
+    { label: "Status", column: "status", dir: "asc" as const },
+  ];
   const status = params.get("status") ?? "";
   const priority = params.get("priority") ?? "";
   // Unresolved by default: the queue is a work list, and yesterday's
@@ -80,7 +106,11 @@ export function Alerts() {
   const query = useQuery({
     queryKey: ["alerts", params.toString()],
     queryFn: () => {
-      const q = new URLSearchParams({ page: String(page) });
+      const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (sort) {
+        q.set("sort", sort);
+        q.set("dir", dir);
+      }
       if (status) q.set("status", status);
       if (priority) q.set("priority", priority);
       // "Unresolved" and an explicit status are mutually exclusive.
@@ -101,6 +131,36 @@ export function Alerts() {
   };
 
   // Paging must not go through setFilter, which drops `page` by design.
+  /** Sorting resets to page one: row 40 of the old order means nothing in the new one. */
+  const setSort = (column: string, nextDir: SortDirection) => {
+    const next = new URLSearchParams(params);
+    next.set("sort", column);
+    next.set("dir", nextDir);
+    next.delete("page");
+    setParams(next);
+  };
+
+  const setPageSize = (size: number) => {
+    const next = new URLSearchParams(params);
+    next.set("pageSize", String(size));
+    next.delete("page");
+    setParams(next);
+  };
+
+  /** The filters and order the list is showing, without the paging. */
+  const exportHref = (() => {
+    const q = new URLSearchParams();
+    if (status) q.set("status", status);
+    if (priority) q.set("priority", priority);
+    if (openOnly && !status) q.set("open", "true");
+    if (sort) {
+      q.set("sort", sort);
+      q.set("dir", dir);
+    }
+    q.set("format", "csv");
+    return `/api/alerts?${q.toString()}`;
+  })();
+
   const goToPage = (next: number) => {
     const q = new URLSearchParams(params);
     q.set("page", String(next));
@@ -178,7 +238,12 @@ export function Alerts() {
         </div>
       )}
 
-      <Card className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <SortSelect options={SORT_OPTIONS} sort={sort} dir={dir} onSort={setSort} />
+        <ExportButton href={exportHref} />
+      </div>
+
+      <Card className="mt-3">
         {query.isLoading ? (
           <Spinner label="Loading alerts" />
         ) : query.isError ? (
@@ -231,7 +296,16 @@ export function Alerts() {
           </ul>
         )}
 
-        {query.data && <Pager page={page} totalPages={totalPages} onChange={goToPage} />}
+        {query.data && (
+          <Pager
+            page={page}
+            totalPages={totalPages}
+            onChange={goToPage}
+            total={query.data.total}
+            pageSize={query.data.pageSize}
+            onPageSize={setPageSize}
+          />
+        )}
       </Card>
     </div>
   );

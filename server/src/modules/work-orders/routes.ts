@@ -14,7 +14,9 @@
  */
 import { Router } from "express";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
+import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { recordAudit } from "../../lib/audit.js";
 import { alertScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import {
@@ -152,6 +154,19 @@ workOrdersRouter.post("/", requireAuth, requireRole("ENGINEER", "ADMIN"), async 
 
 // --------------------------------------------------------------- read
 
+const SORTABLE = ["priority", "status", "createdAt", "engineer"] as const;
+
+const WORK_ORDER_ORDER: Record<
+  (typeof SORTABLE)[number],
+  (d: "asc" | "desc") => Prisma.WorkOrderOrderByWithRelationInput
+> = {
+  priority: (d) => ({ priority: d }),
+  status: (d) => ({ status: d }),
+  createdAt: (d) => ({ createdAt: d }),
+  // By name, not by the foreign key, which would order the table by a UUID.
+  engineer: (d) => ({ engineer: { fullName: d } }),
+};
+
 const listQuery = z
   .object({
     status: z
@@ -160,6 +175,8 @@ const listQuery = z
     archived: z.enum(["true", "false"]).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    ...sortSchema(SORTABLE),
+    format: z.enum(["json", "csv"]).default("json"),
   })
   .strict();
 
@@ -167,7 +184,7 @@ workOrdersRouter.get("/", requireAuth, async (req, res) => {
   const parsed = listQuery.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Unrecognised filter." });
 
-  const { status, archived, page, pageSize } = parsed.data;
+  const { status, archived, page, pageSize, sort, dir, format } = parsed.data;
 
   // The archive is a view of this list, not a separate table: closed work
   // orders stay queryable beside live ones for reporting.
@@ -178,11 +195,43 @@ workOrdersRouter.get("/", requireAuth, async (req, res) => {
     ...(archived === "false" ? { status: { not: "CLOSED" as const } } : {}),
   };
 
+  const fallback = [{ priority: "asc" as const }, { createdAt: "desc" as const }];
+  const orderBy = orderByFrom(sort, dir, WORK_ORDER_ORDER, fallback) as
+    Prisma.WorkOrderOrderByWithRelationInput | Prisma.WorkOrderOrderByWithRelationInput[];
+
+  if (format === "csv") {
+    const all = (
+      await prisma.workOrder.findMany({
+        where,
+        orderBy,
+        take: EXPORT_ROW_LIMIT,
+        include: DETAIL_INCLUDE,
+      })
+    ).map(present);
+
+    return sendCsv(
+      res,
+      `work-orders-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { header: "Work order", value: (r) => r.number },
+        { header: "Priority", value: (r) => r.priority },
+        { header: "Status", value: (r) => r.status },
+        { header: "Equipment", value: (r) => r.equipment.name },
+        { header: "Asset no.", value: (r) => r.equipment.assetNo },
+        { header: "Engineer", value: (r) => r.engineer.fullName },
+        { header: "Opened", value: (r) => r.createdAt },
+        { header: "Closed", value: (r) => r.closedAt ?? "" },
+        { header: "Parts", value: (r) => r.parts.length },
+      ],
+      all
+    );
+  }
+
   const [total, rows] = await Promise.all([
     prisma.workOrder.count({ where }),
     prisma.workOrder.findMany({
       where,
-      orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: DETAIL_INCLUDE,

@@ -23,7 +23,17 @@ import {
   formatDate,
   type AuditEntry,
 } from "../lib/api";
-import { Badge, Card, Empty, ErrorNote, Pager, Spinner } from "../components/ui";
+import {
+  Badge,
+  Card,
+  Empty,
+  ErrorNote,
+  ExportButton,
+  Pager,
+  SortSelect,
+  Spinner,
+  type SortDirection,
+} from "../components/ui";
 
 interface Feed {
   total: number;
@@ -35,6 +45,47 @@ interface Feed {
 export function Activity() {
   const [action, setAction] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [sort, setSort] = useState<string | null>(null);
+  const [dir, setDir] = useState<SortDirection>("desc");
+
+  const SORT_OPTIONS = [
+    { label: "Newest first", column: "createdAt", dir: "desc" as const },
+    { label: "Oldest first", column: "createdAt", dir: "asc" as const },
+    { label: "Event type", column: "action", dir: "asc" as const },
+    { label: "Who", column: "actor", dir: "asc" as const },
+  ];
+
+  const listQuery = (() => {
+    const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (action) q.set("action", action);
+    if (sort) {
+      q.set("sort", sort);
+      q.set("dir", dir);
+    }
+    return q;
+  })();
+
+  /** The same filter and order as the feed, without the paging. */
+  const exportHref = (() => {
+    const q = new URLSearchParams(listQuery);
+    q.delete("page");
+    q.delete("pageSize");
+    q.set("format", "csv");
+    return `/api/audit?${q.toString()}`;
+  })();
+
+  /** Sorting or resizing restarts at page one: the old number describes a different list. */
+  const onSort = (column: string, nextDir: SortDirection) => {
+    setSort(column);
+    setDir(nextDir);
+    setPage(1);
+  };
+
+  const onPageSize = (size: number) => {
+    setPageSize(size);
+    setPage(1);
+  };
 
   const actions = useQuery({
     queryKey: ["audit-actions"],
@@ -42,11 +93,8 @@ export function Activity() {
   });
 
   const query = useQuery({
-    queryKey: ["audit", action, page],
-    queryFn: () =>
-      api.get<Feed>(
-        `/api/audit?page=${page}${action ? `&action=${encodeURIComponent(action)}` : ""}`
-      ),
+    queryKey: ["audit", action, page, pageSize, sort, dir],
+    queryFn: () => api.get<Feed>(`/api/audit?${listQuery.toString()}`),
     placeholderData: keepPreviousData,
   });
 
@@ -59,7 +107,7 @@ export function Activity() {
         Every recorded change, newest first. {query.data ? `${query.data.total} entries.` : ""}
       </p>
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <select
           value={action}
           onChange={(e) => {
@@ -75,6 +123,12 @@ export function Activity() {
             </option>
           ))}
         </select>
+
+        <SortSelect options={SORT_OPTIONS} sort={sort} dir={dir} onSort={onSort} />
+
+        <div className="ml-auto">
+          <ExportButton href={exportHref} />
+        </div>
       </div>
 
       <Card className="mt-4">
@@ -97,7 +151,16 @@ export function Activity() {
           </ul>
         )}
 
-        {query.data && <Pager page={page} totalPages={totalPages} onChange={setPage} />}
+        {query.data && (
+          <Pager
+            page={page}
+            totalPages={totalPages}
+            onChange={setPage}
+            total={query.data.total}
+            pageSize={query.data.pageSize}
+            onPageSize={onPageSize}
+          />
+        )}
       </Card>
     </div>
   );

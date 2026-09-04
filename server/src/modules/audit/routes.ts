@@ -13,16 +13,31 @@
  */
 import { Router } from "express";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
+import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 
 export const auditRouter = Router();
+
+const SORTABLE = ["createdAt", "action", "actor"] as const;
+
+const AUDIT_ORDER: Record<
+  (typeof SORTABLE)[number],
+  (d: "asc" | "desc") => Prisma.AuditLogOrderByWithRelationInput
+> = {
+  createdAt: (d) => ({ createdAt: d }),
+  action: (d) => ({ action: d }),
+  actor: (d) => ({ actor: { fullName: d } }),
+};
 
 const feedQuery = z
   .object({
     action: z.string().max(64).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    ...sortSchema(SORTABLE),
+    format: z.enum(["json", "csv"]).default("json"),
   })
   .strict();
 
@@ -60,14 +75,43 @@ auditRouter.get("/", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, r
   const parsed = feedQuery.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Unrecognised filter." });
 
-  const { action, page, pageSize } = parsed.data;
+  const { action, page, pageSize, sort, dir, format } = parsed.data;
   const where = action ? { action } : {};
+
+  const orderBy = orderByFrom(sort, dir, AUDIT_ORDER, {
+    createdAt: "desc" as const,
+  }) as Prisma.AuditLogOrderByWithRelationInput;
+
+  if (format === "csv") {
+    const all = await withEquipment(
+      await prisma.auditLog.findMany({
+        where,
+        orderBy,
+        take: EXPORT_ROW_LIMIT,
+        include: { actor: { select: { fullName: true } } },
+      })
+    );
+
+    return sendCsv(
+      res,
+      `activity-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { header: "Time", value: (r) => r.createdAt },
+        { header: "Action", value: (r) => r.action },
+        { header: "Entity", value: (r) => r.entity },
+        { header: "Equipment", value: (r) => r.equipment?.name ?? "" },
+        { header: "Asset no.", value: (r) => r.equipment?.assetNo ?? "" },
+        { header: "Actor", value: (r) => r.actor?.fullName ?? "System" },
+      ],
+      all
+    );
+  }
 
   const [total, rows] = await Promise.all([
     prisma.auditLog.count({ where }),
     prisma.auditLog.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: { actor: { select: { fullName: true } } },
