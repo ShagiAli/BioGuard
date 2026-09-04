@@ -24,6 +24,7 @@ import {
   type WorkOrderStatus,
 } from "../lib/api";
 import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline } from "../components/ui";
+import { Notes } from "../components/Notes";
 import { useAuth } from "../auth";
 import { PartsPanel } from "../components/PartsPanel";
 
@@ -252,6 +253,7 @@ export function WorkOrderDetail() {
               </Field>
             </div>
           </Card>
+          <Notes basePath={`/api/work-orders/${wo.id}`} />
         </aside>
       </div>
 
@@ -309,6 +311,7 @@ function CloseDialog({
   const [finalResolution, setFinalResolution] = useState("");
   const [cost, setCost] = useState("");
   const [downtimeHours, setDowntimeHours] = useState("0");
+  const [labourHours, setLabourHours] = useState("");
 
   const ready = repairActions.trim() && finalResolution.trim();
 
@@ -368,6 +371,22 @@ function CloseDialog({
                 className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 font-mono text-sm"
               />
             </label>
+            <label className="block">
+              <span className="text-xs uppercase tracking-wide text-slate-500">
+                Labour (hours)
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.25"
+                value={labourHours}
+                onChange={(e) => setLabourHours(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 font-mono text-sm"
+              />
+              {/* Not the same as downtime: an hour of work can sit inside
+                  three weeks of waiting for a part. */}
+              <span className="mt-1 block text-xs text-slate-400">Engineer time, not downtime.</span>
+            </label>
           </div>
         </div>
 
@@ -382,6 +401,7 @@ function CloseDialog({
                 repairActions,
                 finalResolution,
                 ...(cost ? { cost: Number(cost) } : {}),
+                ...(labourHours ? { labourHours: Number(labourHours) } : {}),
                 downtimeHours: Number(downtimeHours) || 0,
               })
             }

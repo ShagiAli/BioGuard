@@ -19,6 +19,7 @@ export default defineConfig({
             "tests/cron-endpoint.test.ts",
             "tests/listing.test.ts",
             "tests/equipment-write.test.ts",
+            "tests/sla.test.ts",
           ],
     testTimeout: 30_000,
     hookTimeout: 60_000,

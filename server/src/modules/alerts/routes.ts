@@ -11,9 +11,10 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
+import { slaFor } from "../../lib/sla.js";
 import { recordAudit } from "../../lib/audit.js";
 import { alertScope, equipmentScope, requireAuth, triagesAlerts } from "../../middleware/auth.js";
-import type { AlertStatus } from "@prisma/client";
+import type { AlertStatus, Priority } from "@prisma/client";
 import { alertNumber, canTransitionAlert } from "./workflow.js";
 import { notifyAcknowledged, notifyAssigned, notifyRaised } from "./notify.js";
 
@@ -54,8 +55,17 @@ const DETAIL_INCLUDE = {
 } as const;
 
 /** The stored sequence is the truth; the reference number is its presentation. */
-function present<T extends { seq: number; openedAt: Date }>(alert: T) {
-  return { ...alert, number: alertNumber(alert.seq, alert.openedAt) };
+function present<
+  T extends { seq: number; openedAt: Date; priority: Priority; acknowledgedAt: Date | null },
+>(alert: T) {
+  return {
+    ...alert,
+    number: alertNumber(alert.seq, alert.openedAt),
+    // Derived on the way out rather than stored. Its only inputs are the
+    // two timestamps the alert already keeps, so there is nothing here
+    // that could drift out of agreement with them.
+    sla: slaFor(alert.priority, alert.openedAt, alert.acknowledgedAt),
+  };
 }
 
 // ------------------------------------------------------------- create
@@ -105,7 +115,7 @@ alertsRouter.post("/", requireAuth, async (req, res) => {
       equipmentId: device.id,
       status: { notIn: FINISHED },
     },
-    select: { id: true, seq: true, openedAt: true },
+    select: { id: true, seq: true, openedAt: true, priority: true, acknowledgedAt: true },
   });
 
   const alert = await prisma.alert.create({
@@ -444,6 +454,56 @@ alertsRouter.post("/:id/cancel", requireAuth, async (req, res) => {
 });
 
 /** Engineers available for assignment, for the triage dropdown. */
+const noteSchema = z.object({ body: z.string().min(1).max(4000) }).strict();
+
+/**
+ * The conversation around a fault.
+ *
+ * Kept apart from the alert's own description, which is what the person
+ * who found the fault wrote and should stay as they wrote it.
+ */
+alertsRouter.get("/:id/notes", requireAuth, async (req, res) => {
+  const id = z.uuid().safeParse(req.params.id);
+  if (!id.success) return res.status(404).json({ error: "Alert not found." });
+
+  // Scoped through the alert: a note is only as readable as the fault it
+  // hangs off.
+  const alert = await prisma.alert.findFirst({
+    where: { id: id.data, ...alertScope(req.user!) },
+    select: { id: true },
+  });
+  if (!alert) return res.status(404).json({ error: "Alert not found." });
+
+  const notes = await prisma.note.findMany({
+    where: { alertId: alert.id },
+    orderBy: { createdAt: "asc" },
+    include: { author: { select: { id: true, fullName: true } } },
+  });
+
+  res.json({ notes });
+});
+
+alertsRouter.post("/:id/notes", requireAuth, async (req, res) => {
+  const id = z.uuid().safeParse(req.params.id);
+  if (!id.success) return res.status(404).json({ error: "Alert not found." });
+
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Write something first." });
+
+  const alert = await prisma.alert.findFirst({
+    where: { id: id.data, ...alertScope(req.user!) },
+    select: { id: true },
+  });
+  if (!alert) return res.status(404).json({ error: "Alert not found." });
+
+  const note = await prisma.note.create({
+    data: { body: parsed.data.body, alertId: alert.id, authorId: req.user!.id },
+    include: { author: { select: { id: true, fullName: true } } },
+  });
+
+  res.status(201).json(note);
+});
+
 alertsRouter.get("/meta/engineers", requireAuth, async (req, res) => {
   if (!triagesAlerts(req.user!)) {
     return res.status(403).json({ error: "Your role does not allow this action." });

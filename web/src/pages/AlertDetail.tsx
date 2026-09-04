@@ -16,6 +16,7 @@ import {
   api,
   ApiError,
   formatDate,
+  formatDuration,
   PRIORITY_LABELS,
   PART_STATUS_LABELS,
   partTone,
@@ -27,6 +28,7 @@ import {
   type WorkOrder,
 } from "../lib/api";
 import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline } from "../components/ui";
+import { Notes } from "../components/Notes";
 import { AuditDiff } from "./Activity";
 import { useAuth } from "../auth";
 
@@ -199,6 +201,42 @@ export function AlertDetail() {
 
         <aside className="space-y-5">
           <Card className="p-4">
+            <h2 className="mb-3 text-sm font-medium text-slate-800">Response time</h2>
+            {/* The window is hospital policy, measured from when the
+                fault was reported. An alert nobody has picked up is
+                already late once the target passes — waiting for an
+                acknowledgement to say so is how a breach goes unnoticed. */}
+            <div className="flex items-baseline gap-2">
+              <Badge tone={alert.sla.breached ? "rose" : "emerald"}>
+                {alert.sla.breached ? "Outside target" : "Within target"}
+              </Badge>
+              <span className="font-mono text-sm text-slate-700">
+                {formatDuration(alert.sla.elapsedMinutes)}
+              </span>
+            </div>
+            <dl className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Target</dt>
+                <dd className="font-mono text-slate-700">
+                  {formatDuration(alert.sla.responseMinutes)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Due by</dt>
+                <dd className="font-mono text-slate-700">{formatDate(alert.sla.targetAt)}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">
+                  {alert.sla.respondedAt ? "Picked up" : "Still waiting"}
+                </dt>
+                <dd className="font-mono text-slate-700">
+                  {alert.sla.respondedAt ? formatDate(alert.sla.respondedAt) : "—"}
+                </dd>
+              </div>
+            </dl>
+          </Card>
+
+          <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium text-slate-800">Progress</h2>
             {/* Times rather than dates: an alert can be reported, received
                 and assigned inside one morning, and four identical dates
@@ -258,6 +296,7 @@ export function AlertDetail() {
               )}
             </div>
           </Card>
+          <Notes basePath={`/api/alerts/${alert.id}`} />
         </aside>
       </div>
     </div>

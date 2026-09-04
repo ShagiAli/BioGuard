@@ -179,6 +179,24 @@ export function formatDateTime(iso: string | Date | null): string {
   return `${formatDate(d.toISOString())}, ${hh}:${mm}`;
 }
 
+/**
+ * Minutes as something a person reads at a glance.
+ *
+ * Response times run from a quarter of an hour to a working day, so the
+ * unit has to change with the size: "15m", "4h", "1d 4h". Rendering
+ * 1440 minutes as "1440m" is technically true and useless on a queue
+ * somebody is scanning.
+ */
+export function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return restMinutes ? `${hours}h ${restMinutes}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours ? `${days}d ${restHours}h` : `${days}d`;
+}
+
 /** Whole days from today until the given date, in UTC calendar days. */
 export function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
@@ -399,6 +417,18 @@ export interface Alert {
   };
   raisedBy: { id: string; fullName: string };
   acknowledgedBy: { id: string; fullName: string } | null;
+  /**
+   * Derived by the server from the two timestamps below, never stored.
+   * The client does not re-derive it: the response window is policy, and
+   * a second copy of a policy is a second answer.
+   */
+  sla: {
+    responseMinutes: number;
+    targetAt: string;
+    respondedAt: string | null;
+    elapsedMinutes: number;
+    breached: boolean;
+  };
   assignedTo: { id: string; fullName: string } | null;
   workOrder: {
     id: string;
@@ -422,6 +452,7 @@ export interface WorkOrder {
   createdAt: string;
   completedAt: string | null;
   closedAt: string | null;
+  labourHours: string | null;
   maintenanceRecordId: string | null;
   alert: {
     id: string;

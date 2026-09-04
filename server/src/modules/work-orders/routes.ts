@@ -351,12 +351,69 @@ workOrdersRouter.patch("/:id", requireAuth, requireRole("ENGINEER", "ADMIN"), as
 
 // -------------------------------------------------------------- close
 
+const noteSchema = z.object({ body: z.string().min(1).max(4000) }).strict();
+
+/**
+ * The conversation around a repair.
+ *
+ * Separate from findings and repair actions, which are the engineer's
+ * account and belong to the record a device carries for its life. A note
+ * is somebody asking whether the loan pump arrived.
+ */
+workOrdersRouter.get("/:id/notes", requireAuth, async (req, res) => {
+  const id = z.uuid().safeParse(req.params.id);
+  if (!id.success) return res.status(404).json({ error: "Work order not found." });
+
+  // Scoped through the work order, so notes cannot be read on a repair
+  // the caller could not open.
+  const wo = await prisma.workOrder.findFirst({
+    where: { id: id.data, ...scoped(req.user!) },
+    select: { id: true },
+  });
+  if (!wo) return res.status(404).json({ error: "Work order not found." });
+
+  const notes = await prisma.note.findMany({
+    where: { workOrderId: wo.id },
+    orderBy: { createdAt: "asc" },
+    include: { author: { select: { id: true, fullName: true } } },
+  });
+
+  res.json({ notes });
+});
+
+workOrdersRouter.post("/:id/notes", requireAuth, async (req, res) => {
+  const id = z.uuid().safeParse(req.params.id);
+  if (!id.success) return res.status(404).json({ error: "Work order not found." });
+
+  const parsed = noteSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Write something first." });
+
+  const wo = await prisma.workOrder.findFirst({
+    where: { id: id.data, ...scoped(req.user!) },
+    select: { id: true },
+  });
+  if (!wo) return res.status(404).json({ error: "Work order not found." });
+
+  const note = await prisma.note.create({
+    data: { body: parsed.data.body, workOrderId: wo.id, authorId: req.user!.id },
+    include: { author: { select: { id: true, fullName: true } } },
+  });
+
+  res.status(201).json(note);
+});
+
 const closeSchema = z
   .object({
     repairActions: z.string().min(1, "Describe the repair.").max(4000),
     finalResolution: z.string().min(1, "Record the outcome.").max(2000),
     cost: z.coerce.number().min(0).max(10_000_000).optional(),
     downtimeHours: z.coerce.number().int().min(0).max(10_000).default(0),
+    /**
+     * Engineer time, which is not downtime. An hour of work can sit
+     * inside three weeks of waiting for a part, and a department that
+     * reports the two as one number cannot answer either question.
+     */
+    labourHours: z.coerce.number().min(0).max(999).optional(),
   })
   .strict();
 
@@ -435,6 +492,7 @@ workOrdersRouter.post(
           status: "CLOSED",
           repairActions: parsed.data.repairActions,
           finalResolution: parsed.data.finalResolution,
+          labourHours: parsed.data.labourHours ?? null,
           completedAt: before.completedAt ?? closedAt,
           closedAt,
           closedById: req.user!.id,

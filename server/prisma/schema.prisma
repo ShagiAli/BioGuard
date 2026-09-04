@@ -150,6 +150,7 @@ model User {
   maintenanceLogged MaintenanceRecord[]
   notifications     Notification[]
   auditEntries      AuditLog[]
+  notes             Note[]              @relation("NoteAuthor")
 
   raisedAlerts       Alert[]     @relation("AlertRaiser")
   acknowledgedAlerts Alert[]     @relation("AlertAcknowledger")
@@ -438,6 +439,8 @@ model Alert {
   workOrder     WorkOrder?
   notifications Notification[]
 
+  notes Note[]
+
   @@index([status, priority])
   @@index([assignedToId, status])
   @@index([equipmentId, openedAt])
@@ -473,6 +476,10 @@ model WorkOrder {
   diagnosis       String?
   repairActions   String?
   finalResolution String?
+  /// Engineer time on this repair, recorded when it is closed. Separate
+  /// from downtime, which is how long the device was unavailable: an
+  /// hour of work can sit inside three weeks of waiting for a part.
+  labourHours     Decimal? @db.Decimal(5, 2)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -485,10 +492,42 @@ model WorkOrder {
   maintenanceRecord   MaintenanceRecord? @relation(fields: [maintenanceRecordId], references: [id])
 
   parts WorkOrderPart[]
+  notes Note[]
 
   @@index([status, priority])
   @@index([engineerId, status])
   @@index([equipmentId])
+}
+
+/// A comment on an alert or a work order.
+///
+/// Deliberately not the same thing as findings, diagnosis or repair
+/// actions, which are the engineer's account of the fault and belong to
+/// the record. A note is the conversation around it — a nurse adding
+/// that the fault only happens on mains power, a manager asking whether
+/// the loan pump arrived. Mixing the two would put hearsay in a document
+/// kept for audit.
+///
+/// Exactly one of alertId and workOrderId is set. That is enforced in
+/// the API rather than by a check constraint, so the schema Prisma
+/// generates and the schema in the database cannot drift apart.
+model Note {
+  id   String @id @default(uuid(7)) @db.Uuid
+  body String
+
+  authorId String @db.Uuid
+  author   User   @relation("NoteAuthor", fields: [authorId], references: [id])
+
+  alertId String? @db.Uuid
+  alert   Alert?  @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  workOrderId String?    @db.Uuid
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([alertId, createdAt])
+  @@index([workOrderId, createdAt])
 }
 
 /// A part needed for a repair, and how far along it is.
