@@ -9,7 +9,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import {
   ALERT_STATUS_LABELS,
   alertStatusTone,
@@ -26,7 +26,7 @@ import {
   type AuditEntry,
   type WorkOrder,
 } from "../lib/api";
-import { Badge, Button, Card, ErrorNote, Field, Spinner } from "../components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline } from "../components/ui";
 import { AuditDiff } from "./Activity";
 import { useAuth } from "../auth";
 
@@ -200,27 +200,22 @@ export function AlertDetail() {
         <aside className="space-y-5">
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium text-slate-800">Progress</h2>
-            <div className="space-y-3">
-              <Step done label="Reported" at={alert.openedAt} by={alert.raisedBy.fullName} />
-              <Step
-                done={!!alert.acknowledgedAt}
-                label="Received"
-                at={alert.acknowledgedAt}
-                by={alert.acknowledgedBy?.fullName}
-              />
-              <Step
-                done={!!alert.assignedAt}
-                label="Assigned"
-                at={alert.assignedAt}
-                by={alert.assignedTo?.fullName}
-              />
-              <Step
-                done={alert.status === "RESOLVED"}
-                label="Resolved"
-                at={alert.resolvedAt}
-                by={undefined}
-              />
-            </div>
+            {/* Times rather than dates: an alert can be reported, received
+                and assigned inside one morning, and four identical dates
+                say nothing about the order it went in. */}
+            <Timeline
+              steps={[
+                { label: "Reported", at: alert.openedAt, by: alert.raisedBy.fullName },
+                {
+                  label: "Received",
+                  at: alert.acknowledgedAt,
+                  by: alert.acknowledgedBy?.fullName,
+                },
+                { label: "Assigned", at: alert.assignedAt, by: alert.assignedTo?.fullName },
+                { label: "Work order raised", at: alert.workOrder?.createdAt ?? null },
+                { label: "Resolved", at: alert.resolvedAt },
+              ]}
+            />
           </Card>
 
           <Card className="p-4">
@@ -269,32 +264,3 @@ export function AlertDetail() {
   );
 }
 
-function Step({
-  done,
-  label,
-  at,
-  by,
-}: {
-  done: boolean;
-  label: string;
-  at: string | null;
-  by?: string;
-}) {
-  return (
-    <div className="flex items-start gap-2">
-      <CheckCircle2
-        size={15}
-        className={`mt-0.5 shrink-0 ${done ? "text-emerald-600" : "text-slate-200"}`}
-      />
-      <div className="min-w-0">
-        <div className={`text-sm ${done ? "text-slate-800" : "text-slate-400"}`}>{label}</div>
-        {at && (
-          <div className="text-xs text-slate-400">
-            {formatDate(at)}
-            {by ? ` · ${by}` : ""}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}

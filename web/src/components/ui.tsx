@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatDateTime } from "../lib/api";
 
 export type Tone = "rose" | "amber" | "sky" | "slate" | "emerald" | "teal";
 
@@ -303,6 +304,106 @@ export function SortableHeader({
   );
 }
 
+/**
+ * Tabs across a detail page.
+ *
+ * The active tab belongs in the URL, for the same reason the equipment
+ * filters do: it makes a particular view of a device something you can
+ * send to a colleague, and it makes the back button step through what
+ * someone actually looked at rather than leaving the page.
+ *
+ * A tab whose content does not exist yet is simply absent. Showing it
+ * disabled would advertise a capability and then refuse it, which is a
+ * worse answer than not raising the subject.
+ */
+export function Tabs<T extends string>({
+  tabs,
+  current,
+  onChange,
+}: {
+  tabs: { key: T; label: string; count?: number }[];
+  current: T;
+  onChange: (key: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 border-b border-slate-200" role="tablist">
+      {tabs.map(({ key, label, count }) => {
+        const active = key === current;
+        return (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(key)}
+            className={`-mb-px cursor-pointer border-b-2 px-3 py-2.5 text-sm transition ${
+              active
+                ? "border-brand-600 font-medium text-brand-800"
+                : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800"
+            }`}
+          >
+            {label}
+            {count !== undefined && (
+              <span className={`ml-1.5 tabular-nums ${active ? "text-brand-600" : "text-slate-400"}`}>
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * A vertical progress timeline.
+ *
+ * Reached and unreached steps are drawn differently on purpose: the
+ * point of the control is to answer "where has this got to", which a
+ * uniform list of timestamps does not. Steps with no time yet are the
+ * ones still to happen, and read as outlines.
+ */
+export function Timeline({
+  steps,
+}: {
+  steps: { label: string; at?: string | Date | null; by?: string | null; detail?: ReactNode }[];
+}) {
+  return (
+    <ol className="relative">
+      {steps.map((step, i) => {
+        const done = !!step.at;
+        const last = i === steps.length - 1;
+        return (
+          <li key={`${step.label}-${i}`} className="relative flex gap-3 pb-5 last:pb-0">
+            {!last && (
+              <span
+                className={`absolute left-[7px] top-4 bottom-0 w-px ${done ? "bg-brand-300" : "bg-slate-200"}`}
+                aria-hidden="true"
+              />
+            )}
+            <span
+              className={`relative z-10 mt-1 h-[15px] w-[15px] shrink-0 rounded-full border-2 ${
+                done ? "border-brand-600 bg-brand-600" : "border-slate-300 bg-white"
+              }`}
+              aria-hidden="true"
+            />
+            <div className="min-w-0 flex-1">
+              <div className={`text-sm ${done ? "text-slate-800" : "text-slate-400"}`}>
+                {step.label}
+              </div>
+              {step.at && (
+                <div className="font-mono text-xs text-slate-500">
+                  {formatDateTime(step.at)}
+                  {step.by ? ` · ${step.by}` : ""}
+                </div>
+              )}
+              {step.detail && <div className="mt-1 text-xs text-slate-500">{step.detail}</div>}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 /**
  * "Sort by" for a list that is not a table.
  *

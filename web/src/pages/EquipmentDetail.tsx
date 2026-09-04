@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CalendarClock, QrCode, Siren, Wrench, X } from "lucide-react";
 import {
@@ -17,10 +17,12 @@ import {
   type AuditEntry,
   type EquipmentDetail as Detail,
 } from "../lib/api";
-import { Badge, Button, Card, ErrorNote, Field, Spinner, pmTone } from "../components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Spinner, pmTone , Tabs } from "../components/ui";
 import { AuditDiff } from "./Activity";
 import { ReportProblem } from "../components/ReportProblem";
 import { useAuth } from "../auth";
+
+type EquipmentTab = "overview" | "maintenance" | "changes";
 
 export function EquipmentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -31,6 +33,25 @@ export function EquipmentDetail() {
   const [toast, setToast] = useState<string | null>(null);
 
   const canRecord = user?.role === "ADMIN" || user?.role === "ENGINEER";
+
+  /**
+   * The open tab lives in the URL for the same reason the equipment
+   * filters do: it makes one view of one device something you can send
+   * to a colleague, and it keeps the back button stepping through what
+   * was actually looked at.
+   *
+   * There is no Files tab. The design has one; the application has
+   * nowhere to put a file yet, and a tab that opens onto an apology is
+   * worse than a tab that is not there.
+   */
+  const [tabParams, setTabParams] = useSearchParams();
+  const tab = (tabParams.get("tab") ?? "overview") as EquipmentTab;
+  const setTab = (key: EquipmentTab) => {
+    const next = new URLSearchParams(tabParams);
+    if (key === "overview") next.delete("tab");
+    else next.set("tab", key);
+    setTabParams(next, { replace: true });
+  };
   const canSeeCost = canSeeCosts(user?.role);
 
   const query = useQuery({
@@ -90,6 +111,19 @@ export function EquipmentDetail() {
         </div>
       </div>
 
+      <div className="mt-5">
+        <Tabs
+          tabs={[
+            { key: "overview", label: "Overview" },
+            { key: "maintenance", label: "Maintenance history", count: d.maintenance.length },
+            { key: "changes", label: "Change history" },
+          ]}
+          current={tab}
+          onChange={setTab}
+        />
+      </div>
+
+      {tab === "overview" && (
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <section className="space-y-5 lg:col-span-2">
           <Card className="p-4">
@@ -127,41 +161,6 @@ export function EquipmentDetail() {
             </div>
           </Card>
 
-          <Card>
-            <header className="border-b border-slate-200 px-4 py-3">
-              <h2 className="text-sm font-medium text-slate-800">
-                Maintenance history ({d.maintenance.length})
-              </h2>
-            </header>
-            {d.maintenance.length === 0 ? (
-              <div className="p-8 text-sm text-slate-500">No maintenance recorded yet.</div>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {d.maintenance.map((h) => (
-                  <li key={h.id} className="px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs text-slate-500">
-                        {formatDate(h.completedOn)}
-                      </span>
-                      <Badge tone="teal">{titleCase(h.type)}</Badge>
-                      {h.rebased && <Badge tone="amber">Schedule re-based</Badge>}
-                      <span className="ml-auto text-xs text-slate-400">
-                        {h.engineer?.fullName}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-sm text-slate-700">{h.workPerformed}</p>
-                    {canSeeCost && (
-                      <div className="mt-1 font-mono text-xs text-slate-400">
-                        {formatMoney(h.cost)} · {h.downtimeHours}h downtime
-                        {h.latenessDays !== null && h.latenessDays > 0 && ` · ${h.latenessDays}d late`}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-          <ChangeHistory deviceId={d.id} />
         </section>
 
         <aside className="space-y-5">
@@ -202,6 +201,52 @@ export function EquipmentDetail() {
           </Card>
         </aside>
       </div>
+      )}
+
+      {tab === "maintenance" && (
+        <div className="mt-5">
+          <Card>
+            <header className="border-b border-slate-200 px-4 py-3">
+              <h2 className="text-sm font-medium text-slate-800">
+                Maintenance history ({d.maintenance.length})
+              </h2>
+            </header>
+            {d.maintenance.length === 0 ? (
+              <div className="p-8 text-sm text-slate-500">No maintenance recorded yet.</div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {d.maintenance.map((h) => (
+                  <li key={h.id} className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs text-slate-500">
+                        {formatDate(h.completedOn)}
+                      </span>
+                      <Badge tone="teal">{titleCase(h.type)}</Badge>
+                      {h.rebased && <Badge tone="amber">Schedule re-based</Badge>}
+                      <span className="ml-auto text-xs text-slate-400">
+                        {h.engineer?.fullName}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-sm text-slate-700">{h.workPerformed}</p>
+                    {canSeeCost && (
+                      <div className="mt-1 font-mono text-xs text-slate-400">
+                        {formatMoney(h.cost)} · {h.downtimeHours}h downtime
+                        {h.latenessDays !== null && h.latenessDays > 0 && ` · ${h.latenessDays}d late`}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {tab === "changes" && (
+        <div className="mt-5">
+          <ChangeHistory deviceId={d.id} />
+        </div>
+      )}
 
       {recording && (
         <RecordDialog

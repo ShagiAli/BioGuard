@@ -151,6 +151,24 @@ export function formatDate(iso: string | null): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+/**
+ * Date with the time, for anywhere the order of events is the point.
+ *
+ * An alert can be reported, triaged, assigned and acknowledged inside
+ * one morning, and a timeline showing four identical dates says nothing
+ * about the sequence it exists to show.
+ *
+ * Read in UTC like formatDate, so the two never disagree about which day
+ * something happened.
+ */
+export function formatDateTime(iso: string | Date | null): string {
+  if (!iso) return "—";
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${formatDate(d.toISOString())}, ${hh}:${mm}`;
+}
+
 /** Whole days from today until the given date, in UTC calendar days. */
 export function daysUntil(iso: string | null): number | null {
   if (!iso) return null;

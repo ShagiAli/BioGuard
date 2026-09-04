@@ -23,7 +23,7 @@ import {
   type WorkOrder,
   type WorkOrderStatus,
 } from "../lib/api";
-import { Badge, Button, Card, ErrorNote, Field, Spinner } from "../components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline } from "../components/ui";
 import { useAuth } from "../auth";
 import { PartsPanel } from "../components/PartsPanel";
 
@@ -75,6 +75,19 @@ export function WorkOrderDetail() {
   if (query.isError) return <ErrorNote message="That work order could not be found." />;
 
   const wo = query.data!;
+
+  /**
+   * When this repair first started waiting on somebody else.
+   *
+   * The earliest order across the parts, because that is the moment the
+   * job stopped being about an engineer's time and started being about a
+   * supplier's — which is the question people ask of a stalled repair.
+   */
+  const partsOrderedAt =
+    wo.parts
+      .map((part) => part.orderedAt)
+      .filter((at): at is string => at !== null)
+      .sort()[0] ?? null;
   const isClosed = wo.status === "CLOSED";
   const canEdit = !isClosed || user?.role === "ADMIN";
   const canClose = !isClosed && wo.status === "COMPLETED";
@@ -179,6 +192,28 @@ export function WorkOrderDetail() {
         </section>
 
         <aside className="space-y-5">
+          <Card className="p-4">
+            <h2 className="mb-3 text-sm font-medium text-slate-800">Progress</h2>
+            {/* The repair's own clock. Everything that happened before an
+                engineer picked this up belongs to the alert, which has its
+                own timeline. */}
+            <Timeline
+              steps={[
+                { label: "Raised", at: wo.createdAt, by: wo.engineer.fullName },
+                {
+                  label: "Parts ordered",
+                  at: partsOrderedAt,
+                  detail:
+                    wo.parts.length > 0
+                      ? `${wo.parts.length} part${wo.parts.length === 1 ? "" : "s"} on this repair`
+                      : undefined,
+                },
+                { label: "Work completed", at: wo.completedAt },
+                { label: "Closed", at: wo.closedAt, by: wo.closedBy?.fullName },
+              ]}
+            />
+          </Card>
+
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium text-slate-800">Status</h2>
             {isClosed ? (
