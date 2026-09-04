@@ -33,6 +33,9 @@ export function EquipmentDetail() {
   const [toast, setToast] = useState<string | null>(null);
 
   const canRecord = user?.role === "ADMIN" || user?.role === "ENGINEER";
+  // Editing the record is an inventory action, not a servicing one, so
+  // it follows the roles the write endpoints accept rather than these.
+  const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   /**
    * The open tab lives in the URL for the same reason the equipment
@@ -90,6 +93,14 @@ export function EquipmentDetail() {
         </div>
 
         <div className="flex gap-2">
+          {canEdit && (
+            <Link
+              to={`/equipment/${d.id}/edit`}
+              className="rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+            >
+              Edit
+            </Link>
+          )}
           <Button variant="ghost" onClick={() => setShowQr(true)}>
             <span className="flex items-center gap-1.5">
               <QrCode size={15} /> QR label

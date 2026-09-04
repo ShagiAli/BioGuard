@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout";
 import { Dashboard } from "./pages/Dashboard";
 import { Equipment } from "./pages/Equipment";
 import { EquipmentDetail } from "./pages/EquipmentDetail";
+import { EquipmentForm } from "./pages/EquipmentForm";
 import { Notifications } from "./pages/Notifications";
 import { Inbox } from "./pages/Inbox";
 import { Activity } from "./pages/Activity";
@@ -54,6 +55,8 @@ function Shell() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/equipment" element={<Equipment />} />
+        <Route path="/equipment/new" element={<EquipmentForm />} />
+        <Route path="/equipment/:id/edit" element={<EquipmentForm />} />
         <Route path="/equipment/:id" element={<EquipmentDetail />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route path="/mail" element={<Inbox />} />

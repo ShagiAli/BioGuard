@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useAuth } from "../auth";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
 import {
@@ -71,6 +72,11 @@ export function Equipment() {
    * difference between clearing the box and eating a keystroke.
    */
   const lastWritten = useRef(urlQ);
+
+  // Mirrors the roles the API accepts a write from, so the button is
+  // not offered to someone the server will refuse.
+  const { user } = useAuth();
+  const canRegister = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const page = Number(params.get("page") ?? 1);
   const pageSize = Number(params.get("pageSize") ?? 20);
@@ -203,7 +209,17 @@ export function Equipment() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="text-xl font-medium text-slate-900">Equipment</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h1 className="text-xl font-medium text-slate-900">Equipment</h1>
+        {canRegister && (
+          <Link
+            to="/equipment/new"
+            className="rounded-md bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
+          >
+            Add equipment
+          </Link>
+        )}
+      </div>
       <p className="mt-1 text-sm text-slate-500">
         {query.data ? `${query.data.total} matching devices.` : "Loading…"}
       </p>

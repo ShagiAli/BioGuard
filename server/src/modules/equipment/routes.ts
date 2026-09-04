@@ -3,13 +3,14 @@ import rateLimit from "express-rate-limit";
 import { limiterStore } from "../../lib/rateLimitStore.js";
 import { z } from "zod";
 import QRCode from "qrcode";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { env } from "../../env.js";
 import { recordAudit } from "../../lib/audit.js";
 import { canSeeCosts, equipmentScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import { addDays, graceDays, pmState, toDay } from "../../scheduler/rules.js";
+import { generateToken } from "../../lib/security.js";
 
 export const equipmentRouter = Router();
 
@@ -362,5 +363,217 @@ equipmentRouter.patch(
     });
 
     res.json(after);
+  }
+);
+
+/* ------------------------------------------------ registering devices */
+
+/**
+ * The shape of a device, for creating and editing.
+ *
+ * Deliberately absent: `tag` and `publicToken`, which the server owns;
+ * `operationalStatus`, which has its own endpoint because taking a
+ * device out of service is a different event from correcting its record;
+ * and `lastCompletedAt` / `nextDueAt`, which belong to the maintenance
+ * flow. Letting a form write the due date would let someone mark a
+ * ventilator serviced without recording any service.
+ */
+const deviceFields = {
+  name: z.string().min(1).max(160),
+  assetNo: z.string().min(1).max(64),
+  serialNo: z.string().min(1).max(64),
+  model: z.string().min(1).max(120),
+  categoryId: z.uuid(),
+  manufacturerId: z.uuid(),
+  departmentId: z.uuid(),
+  roomId: z.uuid().nullable().optional(),
+  engineerId: z.uuid().nullable().optional(),
+  criticality: z.enum(["CRITICAL", "HIGH", "MEDIUM", "LOW"]),
+  intervalDays: z.coerce.number().int().min(1).max(3650),
+  intervalSource: z.enum(["MANUFACTURER", "HOSPITAL_POLICY", "RISK_BASED"]).optional(),
+  scheduleMode: z.enum(["GRACE", "ANCHORED"]).optional(),
+  graceDaysOverride: z.coerce.number().int().min(0).max(365).nullable().optional(),
+  installedAt: z.coerce.date().nullable().optional(),
+  purchasedAt: z.coerce.date().nullable().optional(),
+  purchasePrice: z.coerce.number().min(0).nullable().optional(),
+  warrantyEndsAt: z.coerce.date().nullable().optional(),
+};
+
+/**
+ * Exported so the mass-assignment guard can be tested without a
+ * database. What a form may write is a security boundary, not a
+ * detail: .strict() is the only thing stopping a caller from posting
+ * its own tag, publicToken or nextDueAt.
+ */
+export const createSchema = z.object(deviceFields).strict();
+/** Every field optional, but at least one present — an empty PATCH is a mistake, not a no-op. */
+export const updateSchema = z
+  .object(deviceFields)
+  .partial()
+  .strict()
+  .refine((body) => Object.keys(body).length > 0, { message: "Nothing to change." });
+
+/**
+ * When a newly registered device is first due.
+ *
+ * A device with no due date is invisible to the nightly sweep, which
+ * means registering one would quietly exclude it from the reminder
+ * ladder forever — the precise failure this application exists to
+ * prevent. So a new device is always due, counted from the last service
+ * if one is known, otherwise from installation, otherwise from today.
+ */
+function firstDueDate(intervalDays: number, installedAt: Date | null | undefined): Date {
+  return addDays(toDay(installedAt ?? new Date()), intervalDays);
+}
+
+/**
+ * Registers a device.
+ *
+ * The tag is derived from the highest one already issued. It is read
+ * and then written, so two people registering at the same moment can
+ * collide — the unique constraint turns that into a failed insert
+ * rather than two devices sharing a tag, and the retry picks the next
+ * number up. A dedicated sequence would be tidier and needs a
+ * migration; the constraint is what makes this safe either way.
+ */
+equipmentRouter.post("/", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the details." });
+  }
+
+  const { installedAt, purchasePrice, ...rest } = parsed.data;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const highest = await prisma.equipment.findFirst({
+      orderBy: { tag: "desc" },
+      select: { tag: true },
+    });
+    // Tags are zero-padded to six digits, so ordering them as text
+    // orders them as numbers.
+    const current = Number(highest?.tag.replace(/\D/g, "") ?? 0) || 0;
+    const tag = `BG-EQ-${String(current + 1 + attempt).padStart(6, "0")}`;
+
+    try {
+      const device = await prisma.equipment.create({
+        data: {
+          ...rest,
+          tag,
+          publicToken: generateToken(16), // opaque, not derivable from the tag
+          installedAt: installedAt ?? null,
+          purchasePrice: purchasePrice ?? null,
+          nextDueAt: firstDueDate(rest.intervalDays, installedAt),
+        },
+      });
+
+      await recordAudit({
+        actorId: req.user!.id,
+        action: "equipment.created",
+        entity: "Equipment",
+        entityId: device.id,
+        after: device,
+      });
+
+      const { publicToken: _hidden, ...safe } = device;
+      return res.status(201).json(safe);
+    } catch (err) {
+      const duplicate = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+      if (!duplicate) throw err;
+
+      // A clash on anything but the tag is the caller's to fix.
+      const target = (err.meta?.target as string[] | undefined) ?? [];
+      if (target.includes("assetNo")) {
+        return res.status(409).json({ error: "That asset number is already in use." });
+      }
+      if (!target.includes("tag")) throw err;
+    }
+  }
+
+  return res.status(503).json({ error: "Could not allocate a tag. Try again." });
+});
+
+/**
+ * Corrects a device record.
+ *
+ * Changing the interval moves the next due date with it, counted from
+ * the last service. Without that, shortening a six-month interval to
+ * three would change nothing until the next time somebody serviced the
+ * device — which is the one moment the change was meant to bring
+ * forward.
+ */
+equipmentRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, res) => {
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the details." });
+  }
+
+  const id = parseId(req.params.id);
+  if (!id) return res.status(404).json({ error: "Equipment not found." });
+
+  const before = await prisma.equipment.findFirst({
+    where: { id, ...equipmentScope(req.user!) },
+  });
+  if (!before) return res.status(404).json({ error: "Equipment not found." });
+
+  const data: Prisma.EquipmentUpdateInput = { ...parsed.data } as Prisma.EquipmentUpdateInput;
+
+  if (parsed.data.intervalDays && parsed.data.intervalDays !== before.intervalDays) {
+    const anchor = before.lastCompletedAt ?? before.installedAt ?? before.createdAt;
+    data.nextDueAt = addDays(toDay(anchor), parsed.data.intervalDays);
+  }
+
+  try {
+    const device = await prisma.equipment.update({ where: { id }, data });
+
+    await recordAudit({
+      actorId: req.user!.id,
+      action: "equipment.updated",
+      entity: "Equipment",
+      entityId: device.id,
+      before,
+      after: device,
+    });
+
+    const { publicToken: _hidden, ...safe } = device;
+    return res.json(safe);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return res.status(409).json({ error: "That asset number is already in use." });
+    }
+    throw err;
+  }
+});
+
+/**
+ * The lists a device form needs to offer.
+ *
+ * One request rather than five, because a form that renders before its
+ * dropdowns have arrived is a form people submit with the wrong
+ * department in it.
+ */
+equipmentRouter.get(
+  "/meta/options",
+  requireAuth,
+  requireRole("ADMIN", "MANAGER"),
+  async (_req, res) => {
+    const [categories, manufacturers, departments, rooms, engineers] = await Promise.all([
+      prisma.equipmentCategory.findMany({
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.manufacturer.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      prisma.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      prisma.room.findMany({
+        select: { id: true, code: true, building: { select: { name: true } } },
+        orderBy: { code: "asc" },
+      }),
+      prisma.user.findMany({
+        where: { role: "ENGINEER", isActive: true },
+        select: { id: true, fullName: true },
+        orderBy: { fullName: "asc" },
+      }),
+    ]);
+
+    res.json({ categories, manufacturers, departments, rooms, engineers });
   }
 );

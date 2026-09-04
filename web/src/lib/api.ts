@@ -116,9 +116,19 @@ export interface EquipmentDetail extends EquipmentRow {
   graceDaysOverride: number | null;
   /** Computed server-side from the scheduling rules, never re-derived here. */
   graceWindow: number;
+  installedAt: string | null;
+  purchasedAt: string | null;
   warrantyEndsAt: string | null;
   purchasePrice: string | null;
-  category: { name: string };
+  /**
+   * The detail endpoint includes whole relations, so the ids are there
+   * to be read. They were not declared until the edit form needed to
+   * pre-select a dropdown, which cannot be done from a name.
+   */
+  category: { id: string; name: string };
+  manufacturer: { id: string; name: string };
+  department: { id: string; name: string };
+  room: { id: string; code: string; floor: number; building: { name: string } } | null;
   maintenance: MaintenanceRecord[];
 }
 
