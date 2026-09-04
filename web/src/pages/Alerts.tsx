@@ -58,6 +58,15 @@ function labelFor(key: string, value: string) {
   return value;
 }
 
+/**
+ * Parameters that steer the table rather than narrow it.
+ *
+ * They live in the URL alongside the filters so a view can be shared
+ * whole, but they are not things anyone would think of as "filtered by",
+ * and offering to remove them as chips would be nonsense.
+ */
+const NOT_A_FILTER = new Set(["page", "pageSize", "sort", "dir", "format"]);
+
 export function Alerts() {
   const [params, setParams] = useSearchParams();
 
@@ -98,7 +107,7 @@ export function Alerts() {
     setParams(q);
   };
 
-  const active = [...params.entries()].filter(([k]) => k !== "page" && k !== "pageSize");
+  const active = [...params.entries()].filter(([k]) => !NOT_A_FILTER.has(k));
   const totalPages = query.data ? Math.ceil(query.data.total / query.data.pageSize) : 1;
 
   return (

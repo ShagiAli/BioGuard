@@ -10,7 +10,18 @@ import {
   titleCase,
   type EquipmentRow,
 } from "../lib/api";
-import { Badge, Card, Empty, ErrorNote, Pager, Spinner, pmTone } from "../components/ui";
+import {
+  Badge,
+  Card,
+  Empty,
+  ErrorNote,
+  ExportButton,
+  Pager,
+  SortableHeader,
+  Spinner,
+  pmTone,
+  type SortDirection,
+} from "../components/ui";
 
 const PM_OPTIONS = ["OVERDUE", "DUE_30", "DUE_NOW", "DUE_SOON", "SCHEDULED"] as const;
 const CRITICALITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
@@ -35,6 +46,15 @@ function labelFor(key: string, value: string) {
   return titleCase(value);
 }
 
+/**
+ * Parameters that steer the table rather than narrow it.
+ *
+ * They live in the URL alongside the filters so a view can be shared
+ * whole, but they are not things anyone would think of as "filtered by",
+ * and offering to remove them as chips would be nonsense.
+ */
+const NOT_A_FILTER = new Set(["page", "pageSize", "sort", "dir", "format"]);
+
 export function Equipment() {
   /**
    * Filters live in the URL. That makes every dashboard drill-down a
@@ -53,6 +73,9 @@ export function Equipment() {
   const lastWritten = useRef(urlQ);
 
   const page = Number(params.get("page") ?? 1);
+  const pageSize = Number(params.get("pageSize") ?? 20);
+  const sort = params.get("sort");
+  const dir: SortDirection = params.get("dir") === "desc" ? "desc" : "asc";
 
   /**
    * The URL is the source of truth, so the box has to follow it when it
@@ -110,7 +133,7 @@ export function Equipment() {
     queryKey: ["equipment", params.toString()],
     queryFn: () =>
       api.get<{ total: number; page: number; pageSize: number; rows: EquipmentRow[] }>(
-        `/api/equipment?${params.toString()}`
+        `/api/equipment?${listParams.toString()}`
       ),
     placeholderData: keepPreviousData,
   });
@@ -132,13 +155,50 @@ export function Equipment() {
     setParams(next);
   };
 
+  /**
+   * The parameters the list is actually built from.
+   *
+   * `pageSize` is defaulted here rather than left to the API so the
+   * export link below asks for exactly what the table is showing.
+   */
+  const listParams = (() => {
+    const next = new URLSearchParams(params);
+    if (!next.get("pageSize")) next.set("pageSize", String(pageSize));
+    return next;
+  })();
+
+  /** Sorting resets to the first page: row 400 of the old order means nothing in the new one. */
+  const setSort = (column: string, nextDir: SortDirection) => {
+    const next = new URLSearchParams(params);
+    next.set("sort", column);
+    next.set("dir", nextDir);
+    next.delete("page");
+    setParams(next);
+  };
+
+  const setPageSize = (size: number) => {
+    const next = new URLSearchParams(params);
+    next.set("pageSize", String(size));
+    next.delete("page");
+    setParams(next);
+  };
+
+  /** Same filters and order as the table, minus the paging — an export is the whole filtered set. */
+  const exportHref = (() => {
+    const next = new URLSearchParams(listParams);
+    next.delete("page");
+    next.delete("pageSize");
+    next.set("format", "csv");
+    return `/api/equipment?${next.toString()}`;
+  })();
+
   const goToPage = (next: number) => {
     const params2 = new URLSearchParams(params);
     params2.set("page", String(next));
     setParams(params2);
   };
 
-  const active = [...params.entries()].filter(([k]) => k !== "page" && k !== "pageSize");
+  const active = [...params.entries()].filter(([k]) => !NOT_A_FILTER.has(k));
   const totalPages = query.data ? Math.ceil(query.data.total / query.data.pageSize) : 1;
 
   return (
@@ -197,6 +257,8 @@ export function Equipment() {
             </option>
           ))}
         </select>
+
+        <ExportButton href={exportHref} />
       </div>
 
       {active.length > 0 && (
@@ -239,12 +301,24 @@ export function Equipment() {
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-2.5 font-medium">Asset</th>
-                <th className="px-4 py-2.5 font-medium">Device</th>
+                <SortableHeader label="Asset" column="assetNo" sort={sort} dir={dir} onSort={setSort} />
+                <SortableHeader label="Device" column="name" sort={sort} dir={dir} onSort={setSort} />
                 <th className="hidden px-4 py-2.5 font-medium lg:table-cell">Location</th>
                 <th className="hidden px-4 py-2.5 font-medium md:table-cell">Engineer</th>
-                <th className="px-4 py-2.5 font-medium">Next PM</th>
-                <th className="px-4 py-2.5 font-medium">State</th>
+                <SortableHeader
+                  label="Next PM"
+                  column="nextDueAt"
+                  sort={sort}
+                  dir={dir}
+                  onSort={setSort}
+                />
+                <SortableHeader
+                  label="State"
+                  column="operationalStatus"
+                  sort={sort}
+                  dir={dir}
+                  onSort={setSort}
+                />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -292,7 +366,14 @@ export function Equipment() {
         )}
 
         {query.data && (
-          <Pager page={page} totalPages={totalPages} onChange={goToPage} />
+          <Pager
+            page={page}
+            totalPages={totalPages}
+            onChange={goToPage}
+            total={query.data.total}
+            pageSize={query.data.pageSize}
+            onPageSize={setPageSize}
+          />
         )}
       </Card>
     </div>

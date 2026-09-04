@@ -3,7 +3,9 @@ import rateLimit from "express-rate-limit";
 import { limiterStore } from "../../lib/rateLimitStore.js";
 import { z } from "zod";
 import QRCode from "qrcode";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
+import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { env } from "../../env.js";
 import { recordAudit } from "../../lib/audit.js";
 import { canSeeCosts, equipmentScope, requireAuth, requireRole } from "../../middleware/auth.js";
@@ -24,6 +26,25 @@ function parseId(raw: unknown): string | null {
  * headline figure is one of these queries, so a count and the list
  * behind it are produced by the same predicate and cannot disagree.
  */
+/**
+ * The columns a caller may order by, and how each one is ordered.
+ *
+ * Department and engineer sort by name rather than by their foreign
+ * key, which would order the table by an opaque UUID and look broken.
+ */
+const SORTABLE = ["name", "assetNo", "nextDueAt", "criticality", "operationalStatus"] as const;
+
+const EQUIPMENT_ORDER: Record<
+  (typeof SORTABLE)[number],
+  (d: "asc" | "desc") => Prisma.EquipmentOrderByWithRelationInput
+> = {
+  name: (d) => ({ name: d }),
+  assetNo: (d) => ({ assetNo: d }),
+  nextDueAt: (d) => ({ nextDueAt: d }),
+  criticality: (d) => ({ criticality: d }),
+  operationalStatus: (d) => ({ operationalStatus: d }),
+};
+
 const listQuery = z
   .object({
     q: z.string().max(120).optional(),
@@ -42,6 +63,9 @@ const listQuery = z
     pm: z.enum(["OVERDUE", "DUE_30", "DUE_NOW", "DUE_SOON", "SCHEDULED"]).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    ...sortSchema(SORTABLE),
+    /** csv returns the whole filtered set rather than the current page. */
+    format: z.enum(["json", "csv"]).default("json"),
   })
   .strict();
 
@@ -67,7 +91,7 @@ equipmentRouter.get("/", requireAuth, async (req, res) => {
   const parsed = listQuery.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Unrecognised filter." });
 
-  const { q, page, pageSize, pm, ...filters } = parsed.data;
+  const { q, page, pageSize, pm, sort, dir, format, ...filters } = parsed.data;
   const today = toDay(new Date());
 
   const where = {
@@ -86,11 +110,47 @@ equipmentRouter.get("/", requireAuth, async (req, res) => {
       : {}),
   };
 
+  const orderBy = orderByFrom(sort, dir, EQUIPMENT_ORDER, { nextDueAt: "asc" as const });
+
+  // An export is the filtered set, not the page someone happens to be
+  // looking at — a spreadsheet of 25 of 184 devices is worse than none.
+  if (format === "csv") {
+    const all = await prisma.equipment.findMany({
+      where,
+      orderBy: orderBy as Prisma.EquipmentOrderByWithRelationInput,
+      take: EXPORT_ROW_LIMIT,
+      include: {
+        department: { select: { name: true } },
+        manufacturer: { select: { name: true } },
+        engineer: { select: { fullName: true } },
+      },
+    });
+
+    return sendCsv(
+      res,
+      `equipment-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { header: "Asset no.", value: (r) => r.assetNo },
+        { header: "Name", value: (r) => r.name },
+        { header: "Manufacturer", value: (r) => r.manufacturer.name },
+        { header: "Model", value: (r) => r.model },
+        { header: "Serial no.", value: (r) => r.serialNo },
+        { header: "Department", value: (r) => r.department.name },
+        { header: "Criticality", value: (r) => r.criticality },
+        { header: "Status", value: (r) => r.operationalStatus },
+        { header: "PM state", value: (r) => pmState(r.nextDueAt, today) },
+        { header: "Next due", value: (r) => r.nextDueAt?.toISOString().slice(0, 10) ?? "" },
+        { header: "Engineer", value: (r) => r.engineer?.fullName ?? "" },
+      ],
+      all
+    );
+  }
+
   const [total, rows] = await Promise.all([
     prisma.equipment.count({ where }),
     prisma.equipment.findMany({
       where,
-      orderBy: [{ nextDueAt: "asc" }],
+      orderBy: orderBy as Prisma.EquipmentOrderByWithRelationInput,
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: {

@@ -118,38 +118,206 @@ export function Button({
  * paging, so all three step through results identically rather than
  * growing three slightly different footers.
  */
+/**
+ * The page numbers to draw, with gaps where the list is long.
+ *
+ * Always shows the first and last page and a window around the current
+ * one, so the footer stays a fixed width whether there are three pages
+ * or three hundred. `null` marks an elision.
+ */
+function pageWindow(page: number, totalPages: number): (number | null)[] {
+  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+
+  const shown = new Set([1, totalPages, page, page - 1, page + 1]);
+  // Keep the run next to whichever end we are near, so the control does
+  // not shrink and grow as you page through.
+  if (page <= 3) [2, 3, 4].forEach((n) => shown.add(n));
+  if (page >= totalPages - 2)
+    [totalPages - 3, totalPages - 2, totalPages - 1].forEach((n) => shown.add(n));
+
+  const pages = [...shown].filter((n) => n >= 1 && n <= totalPages).sort((a, b) => a - b);
+
+  const out: (number | null)[] = [];
+  let previous = 0;
+  for (const n of pages) {
+    if (previous && n - previous > 1) out.push(null);
+    out.push(n);
+    previous = n;
+  }
+  return out;
+}
+
+const PAGE_SIZES = [20, 50, 100] as const;
+
 export function Pager({
   page,
   totalPages,
   onChange,
+  total,
+  pageSize,
+  onPageSize,
 }: {
   page: number;
   totalPages: number;
   onChange: (next: number) => void;
+  /** Row count across every page, for the "showing x to y" line. */
+  total?: number;
+  pageSize?: number;
+  onPageSize?: (next: number) => void;
 }) {
-  if (totalPages <= 1) return null;
+  const showRange = total !== undefined && pageSize !== undefined;
+  const first = showRange ? Math.min((page - 1) * pageSize + 1, total) : 0;
+  const last = showRange ? Math.min(page * pageSize, total) : 0;
+
+  // Renders for a single page when there is a count to state: a footer
+  // that vanishes makes the table jump as a filter narrows the results.
+  if (totalPages <= 1 && !showRange) return null;
 
   return (
-    <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
-      <span>
-        Page {page} of {totalPages}
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
+      <span className="tabular-nums">
+        {showRange ? (
+          total === 0 ? (
+            "No results"
+          ) : (
+            <>
+              Showing {first} to {last} of {total} result{total === 1 ? "" : "s"}
+            </>
+          )
+        ) : (
+          <>
+            Page {page} of {totalPages}
+          </>
+        )}
       </span>
-      <div className="flex gap-2">
-        <button
-          disabled={page <= 1}
-          onClick={() => onChange(page - 1)}
-          className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Previous
-        </button>
-        <button
-          disabled={page >= totalPages}
-          onClick={() => onChange(page + 1)}
-          className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Next
-        </button>
+
+      <div className="flex items-center gap-3">
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              disabled={page <= 1}
+              onClick={() => onChange(page - 1)}
+              className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+
+            {pageWindow(page, totalPages).map((n, i) =>
+              n === null ? (
+                <span key={`gap-${i}`} className="px-1 text-slate-400">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={n}
+                  onClick={() => onChange(n)}
+                  aria-current={n === page ? "page" : undefined}
+                  className={`min-w-7 cursor-pointer rounded border px-2 py-1 tabular-nums transition ${
+                    n === page
+                      ? "border-brand-600 bg-brand-600 font-medium text-white"
+                      : "border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  {n}
+                </button>
+              )
+            )}
+
+            <button
+              disabled={page >= totalPages}
+              onClick={() => onChange(page + 1)}
+              className="cursor-pointer rounded border border-slate-200 px-2 py-1 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Next page"
+            >
+              ›
+            </button>
+          </div>
+        )}
+
+        {onPageSize && pageSize !== undefined && (
+          <label className="flex items-center gap-1.5">
+            <span className="sr-only">Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => onPageSize(Number(e.target.value))}
+              className="cursor-pointer rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
+            >
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
     </div>
+  );
+}
+
+export type SortDirection = "asc" | "desc";
+
+/**
+ * A sortable column heading.
+ *
+ * Ordering happens in the database, not here — sorting only the rows
+ * already on screen would reorder 25 of 184 and read as a bug. This
+ * reports the intent; the caller puts it in the URL and the API applies
+ * it.
+ */
+export function SortableHeader({
+  label,
+  column,
+  sort,
+  dir,
+  onSort,
+  className = "",
+}: {
+  label: string;
+  column: string;
+  sort: string | null;
+  dir: SortDirection;
+  onSort: (column: string, dir: SortDirection) => void;
+  className?: string;
+}) {
+  const active = sort === column;
+  // A fresh column starts ascending; the active one flips.
+  const next: SortDirection = active && dir === "asc" ? "desc" : "asc";
+
+  return (
+    <th
+      className={`px-4 py-2.5 font-medium ${className}`}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        onClick={() => onSort(column, next)}
+        className="flex cursor-pointer items-center gap-1 transition hover:text-slate-900"
+      >
+        {label}
+        <span className={active ? "text-brand-700" : "text-slate-300"} aria-hidden="true">
+          {active ? (dir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+/**
+ * Downloads the current list as CSV.
+ *
+ * A link rather than a fetch, so the browser owns the download and the
+ * session cookie travels with it. It points at the query the table is
+ * showing plus `format=csv`, so an export is the filtered set — not the
+ * page someone happens to be on, and not everything.
+ */
+export function ExportButton({ href, label = "Export" }: { href: string; label?: string }) {
+  return (
+    <a
+      href={href}
+      className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+    >
+      {label}
+    </a>
   );
 }
