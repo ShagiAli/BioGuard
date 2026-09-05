@@ -4,7 +4,6 @@ import { Activity, CalendarClock, Eye, EyeOff, ShieldCheck } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type User } from "./lib/api";
 import { Logo } from "./components/Logo";
-import { DeviceIllustration } from "./components/DeviceIllustration";
 
 interface AuthValue {
   user: User | null;
@@ -77,12 +76,15 @@ export function Login() {
   };
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
+    <div
+      className="grid min-h-screen bg-slate-50 bg-cover bg-left bg-no-repeat xl:grid-cols-2"
+      style={{ backgroundImage: "url(/login-panel.jpg)" }}
+    >
       {/* The form first in the document, so a screen reader and a narrow
           window both reach it before the marketing. */}
-      <div className="flex items-center justify-center bg-white p-6">
+      <div className="flex items-center justify-center bg-white p-6 xl:bg-white/95 xl:backdrop-blur-sm">
         <div className="w-full max-w-sm">
-          <div className="flex items-center gap-3 lg:hidden">
+          <div className="flex items-center gap-3 xl:hidden">
             <Logo className="h-9 w-9 text-brand-700" />
             <div>
               <div className="text-xl font-semibold tracking-tight text-brand-800">BioGuard</div>
@@ -90,7 +92,7 @@ export function Login() {
             </div>
           </div>
 
-          <h1 className="mt-6 text-2xl font-semibold tracking-tight text-slate-900 lg:mt-0">
+          <h1 className="mt-6 text-2xl font-semibold tracking-tight text-slate-900 xl:mt-0">
             Welcome back
           </h1>
           <p className="mt-1 text-sm text-slate-500">Sign in to your BioGuard account.</p>
@@ -157,17 +159,34 @@ export function Login() {
       </div>
 
       {/*
-       * The product panel, light rather than dark: the reference puts it
-       * on a pale ground with the equipment bleeding off the right edge.
+       * The words, over the pale half of the photograph behind them.
        *
-       * The device is drawn rather than photographed — see
-       * DeviceIllustration for why. Swapping in a real photograph later
-       * is a small edit: replace the component with a background layer
-       * carrying the image and the same mask.
+       * The photograph is the page's background rather than this panel's,
+       * because this panel is portrait and the picture is roughly two to
+       * one: cropped to fit here it zoomed until the monitor was the only
+       * thing left and the text sat on top of it. Across the full width
+       * the picture keeps its own composition — equipment right, ward
+       * receding into white on the left — and the words go where the
+       * photographer left room for them.
+       *
+       * xl rather than lg for the same reason. Below about 1280 the crop
+       * is narrow enough that the equipment falls off the right edge and
+       * the panel becomes a photograph of an empty bed; better to give
+       * the form the whole screen, which is a layout this page already
+       * has.
+       *
+       * The wash is not decoration. That half is pale rather than white
+       * and carries bed rails and a second monitor — enough texture to
+       * cost body text its contrast — so this holds it to something type
+       * can sit on, and stops before the equipment.
        */}
-      <div className="relative hidden items-center overflow-hidden bg-gradient-to-br from-brand-50 via-white to-brand-100/70 lg:flex">
+      <div className="relative hidden items-center overflow-hidden xl:flex">
+        <div
+          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/90 via-white/70 to-transparent"
+          aria-hidden="true"
+        />
 
-        <div className="relative min-w-0 flex-1 py-12 pl-12 pr-6">
+        <div className="relative min-w-0 max-w-sm py-12 pl-12 pr-6">
           <div className="flex items-center gap-3">
             <Logo className="h-11 w-11 text-brand-700" />
             <div>
@@ -179,7 +198,7 @@ export function Login() {
           <h2 className="mt-10 text-balance text-3xl font-semibold leading-tight tracking-tight text-slate-900">
             Smart equipment management for better patient care
           </h2>
-          <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600">
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
             Track, maintain and evidence every device across the hospital — and know a service is
             due before it is late.
           </p>
@@ -208,30 +227,11 @@ export function Login() {
                 </span>
                 <div>
                   <div className="text-sm font-semibold text-slate-900">{title}</div>
-                  <p className="mt-0.5 max-w-sm text-sm leading-relaxed text-slate-600">{body}</p>
+                  <p className="mt-0.5 text-sm leading-relaxed text-slate-600">{body}</p>
                 </div>
               </li>
             ))}
           </ul>
-        </div>
-
-        {/*
-         * Its own column, and only where there is room for one. Floated
-         * over the text it crept across the headline as the window
-         * narrowed; below xl the panel is text alone, which is a
-         * composition rather than a casualty.
-         *
-         * Faded at the left edge so it settles into the panel instead of
-         * ending on a line, as the reference does.
-         */}
-        <div className="hidden shrink-0 items-center pr-4 xl:flex" aria-hidden="true">
-          <DeviceIllustration
-            className="h-[21rem] w-auto"
-            style={{
-              maskImage: "linear-gradient(to right, transparent, black 28%)",
-              WebkitMaskImage: "linear-gradient(to right, transparent, black 28%)",
-            }}
-          />
         </div>
       </div>
     </div>
