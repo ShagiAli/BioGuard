@@ -24,6 +24,7 @@ const listQuery = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
+    unread: z.enum(["true", "false"]).optional(),
   })
   .strict();
 
@@ -31,9 +32,10 @@ mailRouter.get("/", requireAuth, async (req, res) => {
   const parsed = listQuery.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ error: "Unrecognised filter." });
 
-  const { page, pageSize } = parsed.data;
+  const { page, pageSize, unread: unreadOnly } = parsed.data;
   const all = oversees(req.user!);
-  const where = all ? {} : { to: req.user!.email };
+  const mailbox = all ? {} : { to: req.user!.email };
+  const where = { ...mailbox, ...(unreadOnly === "true" ? { readAt: null } : {}) };
 
   // Counted rather than derived from `rows`, for the same reason as the
   // notification badge: `rows` is one page, not the mailbox.
@@ -45,7 +47,7 @@ mailRouter.get("/", requireAuth, async (req, res) => {
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
-    prisma.sentEmail.count({ where: { ...where, readAt: null } }),
+    prisma.sentEmail.count({ where: { ...mailbox, readAt: null } }),
   ]);
 
   res.json({ total, page, pageSize, rows, unread, scope: all ? "all" : "own" });

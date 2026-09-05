@@ -12,7 +12,9 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 import { api, STATUS_LABELS, type OperationalStatus } from "../lib/api";
+import { Logo } from "../components/Logo";
 
 interface ScanResult {
   name: string;
@@ -33,10 +35,17 @@ export function Scan({ token }: { token: string }) {
   return (
     <div className="flex min-h-screen justify-center bg-slate-50 p-4">
       <div className="w-full max-w-sm pt-10">
-        <div className="mb-6 text-center">
-          <div className="font-mono text-xl font-semibold tracking-tight text-teal-800">
-            BioGuard
+        <div className="mb-4 flex items-center justify-center gap-2.5">
+          <Logo className="h-8 w-8 text-brand-700" />
+          <div>
+            <div className="text-lg font-semibold tracking-tight text-brand-800">BioGuard</div>
+            <div className="text-[0.65rem] text-slate-500">Protecting care. Protecting life.</div>
           </div>
+        </div>
+
+        <div className="mb-4 flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
+          <ShieldCheck size={14} className="shrink-0 text-emerald-600" />
+          Public equipment information. No sign-in needed.
         </div>
 
         <div className="rounded-lg border border-slate-200 bg-white p-5">
