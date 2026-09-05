@@ -10,7 +10,7 @@
  * an administrator's edit is recorded under its own audit action.
  */
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Lock } from "lucide-react";
 import {
@@ -23,7 +23,7 @@ import {
   type WorkOrder,
   type WorkOrderStatus,
 } from "../lib/api";
-import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline } from "../components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline, Tabs } from "../components/ui";
 import { Notes } from "../components/Notes";
 import { useAuth } from "../auth";
 import { PartsPanel } from "../components/PartsPanel";
@@ -36,7 +36,10 @@ const LIVE_STATUSES: WorkOrderStatus[] = [
   "COMPLETED",
 ];
 
+type WorkOrderTab = "work" | "parts" | "notes";
+
 export function WorkOrderDetail() {
+  const [tabParams, setTabParams] = useSearchParams();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -76,6 +79,15 @@ export function WorkOrderDetail() {
   if (query.isError) return <ErrorNote message="That work order could not be found." />;
 
   const wo = query.data!;
+
+  /** In the URL, so one view of one repair can be sent to somebody. */
+  const tab = (tabParams.get("tab") ?? "work") as WorkOrderTab;
+  const setTab = (key: WorkOrderTab) => {
+    const next = new URLSearchParams(tabParams);
+    if (key === "work") next.delete("tab");
+    else next.set("tab", key);
+    setTabParams(next, { replace: true });
+  };
 
   /**
    * When this repair first started waiting on somebody else.
@@ -142,6 +154,22 @@ export function WorkOrderDetail() {
 
       <div className="mt-5 grid gap-5 lg:grid-cols-3">
         <section className="space-y-5 lg:col-span-2">
+          {/* The repair's own record, split the way the design splits it:
+              what was found, what it needed, and what was said about it.
+              Parts get a tab of their own because a stalled repair is
+              usually stalled on one, and it should not be scrolled past. */}
+          <Tabs
+            tabs={[
+              { key: "work", label: "Work details" },
+              { key: "parts", label: "Parts", count: wo.parts.length },
+              { key: "notes", label: "Notes" },
+            ]}
+            current={tab}
+            onChange={setTab}
+          />
+
+          {tab === "work" && (
+            <>
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium text-slate-800">Reported problem</h2>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
@@ -176,12 +204,6 @@ export function WorkOrderDetail() {
             </div>
           </Card>
 
-          <PartsPanel
-            workOrderId={wo.id}
-            parts={wo.parts}
-            editable={canEdit && (user?.id === wo.engineer.id || user?.role === "ADMIN")}
-          />
-
           {wo.finalResolution && (
             <Card className="p-4">
               <h2 className="mb-2 text-sm font-medium text-slate-800">Final resolution</h2>
@@ -190,6 +212,19 @@ export function WorkOrderDetail() {
               </p>
             </Card>
           )}
+            </>
+          )}
+
+          {tab === "parts" && (
+            <PartsPanel
+              workOrderId={wo.id}
+              parts={wo.parts}
+              editable={canEdit && (user?.id === wo.engineer.id || user?.role === "ADMIN")}
+            />
+          )}
+
+          {tab === "notes" && <Notes basePath={`/api/work-orders/${wo.id}`} />}
+
         </section>
 
         <aside className="space-y-5">
@@ -253,7 +288,6 @@ export function WorkOrderDetail() {
               </Field>
             </div>
           </Card>
-          <Notes basePath={`/api/work-orders/${wo.id}`} />
         </aside>
       </div>
 

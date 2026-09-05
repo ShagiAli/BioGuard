@@ -144,10 +144,39 @@ export function AlertDetail() {
         </div>
       )}
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-3">
-        <section className="space-y-5 lg:col-span-2">
+      {/*
+       * Four panels rather than a wide column and a sidebar: what was
+       * reported, where it has got to, what is true now, and what has
+       * happened. They answer different questions, and the old split ran
+       * the first and last of them together.
+       */}
+      <div className="mt-5 grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
+        <section className="space-y-5">
           <Card className="p-4">
-            <h2 className="mb-3 text-sm font-medium text-slate-800">Reported problem</h2>
+            <h2 className="mb-3 text-sm font-medium text-slate-800">Alert details</h2>
+            <div className="space-y-3">
+              <Field label="Equipment">
+                <Link
+                  to={`/equipment/${alert.equipment.id}`}
+                  className="text-brand-700 hover:text-brand-800"
+                >
+                  {alert.equipment.name}
+                </Link>
+              </Field>
+              <Field label="Asset number" mono>
+                {alert.equipment.assetNo}
+              </Field>
+              <Field label="Location">
+                {alert.equipment.department.name}
+                {alert.equipment.room ? `, room ${alert.equipment.room.code}` : ""}
+              </Field>
+              <Field label="Reported by">{alert.raisedBy.fullName}</Field>
+              <Field label="Reported on">{formatDate(alert.openedAt)}</Field>
+            </div>
+
+            <h3 className="mb-1.5 mt-4 text-xs uppercase tracking-wide text-slate-500">
+              Problem
+            </h3>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
               {alert.description}
             </p>
@@ -171,71 +200,9 @@ export function AlertDetail() {
               </select>
             </Card>
           )}
-
-          <Card>
-            <header className="border-b border-slate-200 px-4 py-3">
-              <h2 className="text-sm font-medium text-slate-800">History</h2>
-            </header>
-            {history.isLoading ? (
-              <Spinner />
-            ) : (history.data?.rows.length ?? 0) === 0 ? (
-              <div className="p-6 text-sm text-slate-500">Nothing recorded yet.</div>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {history.data!.rows.map((entry) => (
-                  <li key={entry.id} className="px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone="slate">{entry.action.replace(/^\w+\./, "").replace(/_/g, " ")}</Badge>
-                      <span className="ml-auto text-xs text-slate-400">
-                        {formatDate(entry.createdAt)}
-                        {entry.actor ? ` · ${entry.actor.fullName}` : ""}
-                      </span>
-                    </div>
-                    <AuditDiff entry={entry} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
         </section>
 
-        <aside className="space-y-5">
-          <Card className="p-4">
-            <h2 className="mb-3 text-sm font-medium text-slate-800">Response time</h2>
-            {/* The window is hospital policy, measured from when the
-                fault was reported. An alert nobody has picked up is
-                already late once the target passes — waiting for an
-                acknowledgement to say so is how a breach goes unnoticed. */}
-            <div className="flex items-baseline gap-2">
-              <Badge tone={alert.sla.breached ? "rose" : "emerald"}>
-                {alert.sla.breached ? "Outside target" : "Within target"}
-              </Badge>
-              <span className="font-mono text-sm text-slate-700">
-                {formatDuration(alert.sla.elapsedMinutes)}
-              </span>
-            </div>
-            <dl className="mt-3 space-y-1.5 text-xs">
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Target</dt>
-                <dd className="font-mono text-slate-700">
-                  {formatDuration(alert.sla.responseMinutes)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">Due by</dt>
-                <dd className="font-mono text-slate-700">{formatDate(alert.sla.targetAt)}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-slate-500">
-                  {alert.sla.respondedAt ? "Picked up" : "Still waiting"}
-                </dt>
-                <dd className="font-mono text-slate-700">
-                  {alert.sla.respondedAt ? formatDate(alert.sla.respondedAt) : "—"}
-                </dd>
-              </div>
-            </dl>
-          </Card>
-
+        <section className="space-y-5">
           <Card className="p-4">
             <h2 className="mb-3 text-sm font-medium text-slate-800">Progress</h2>
             {/* Times rather than dates: an alert can be reported, received
@@ -255,21 +222,33 @@ export function AlertDetail() {
               ]}
             />
           </Card>
+        </section>
 
+        <section className="space-y-5">
           <Card className="p-4">
-            <h2 className="mb-3 text-sm font-medium text-slate-800">Device</h2>
+            <h2 className="mb-3 text-sm font-medium text-slate-800">Current status</h2>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge tone={alertStatusTone(alert.status)}>
+                {ALERT_STATUS_LABELS[alert.status]}
+              </Badge>
+              <Badge tone={alert.sla.breached ? "rose" : "emerald"}>
+                {alert.sla.breached ? "Outside target" : "Within target"}
+              </Badge>
+            </div>
+
             <div className="space-y-3">
-              <Field label="Equipment">
-                <Link
-                  to={`/equipment/${alert.equipment.id}`}
-                  className="text-teal-800 hover:underline"
-                >
-                  {alert.equipment.name}
-                </Link>
+              <Field label="Assigned to">
+                {alert.assignedTo?.fullName ?? "Nobody yet"}
               </Field>
-              <Field label="Location">
-                {alert.equipment.department.name}
-                {alert.equipment.room ? `, room ${alert.equipment.room.code}` : ""}
+              {/* The window is hospital policy, counted from when the fault
+                  was reported. An alert nobody has picked up is late once
+                  the target passes — waiting for an acknowledgement to say
+                  so is how a breach goes unnoticed. */}
+              <Field label="Response target" mono>
+                {formatDuration(alert.sla.responseMinutes)}
+              </Field>
+              <Field label={alert.sla.respondedAt ? "Picked up after" : "Waiting"} mono>
+                {formatDuration(alert.sla.elapsedMinutes)}
               </Field>
               {alert.workOrder && (
                 <Field label="Work order">
@@ -296,8 +275,39 @@ export function AlertDetail() {
               )}
             </div>
           </Card>
+        </section>
+
+        <section className="space-y-5">
+          <Card>
+            <header className="border-b border-slate-200 px-4 py-3">
+              <h2 className="text-sm font-medium text-slate-800">History</h2>
+            </header>
+            {history.isLoading ? (
+              <Spinner />
+            ) : (history.data?.rows.length ?? 0) === 0 ? (
+              <div className="p-6 text-sm text-slate-500">Nothing recorded yet.</div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {history.data!.rows.map((entry) => (
+                  <li key={entry.id} className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone="slate">
+                        {entry.action.replace(/^\w+\./, "").replace(/_/g, " ")}
+                      </Badge>
+                      <span className="ml-auto text-xs text-slate-400">
+                        {formatDate(entry.createdAt)}
+                        {entry.actor ? ` · ${entry.actor.fullName}` : ""}
+                      </span>
+                    </div>
+                    <AuditDiff entry={entry} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
           <Notes basePath={`/api/alerts/${alert.id}`} />
-        </aside>
+        </section>
       </div>
     </div>
   );
