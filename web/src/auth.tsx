@@ -4,6 +4,7 @@ import { Activity, CalendarClock, Eye, EyeOff, ShieldCheck } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type User } from "./lib/api";
 import { Logo } from "./components/Logo";
+import { DeviceIllustration } from "./components/DeviceIllustration";
 
 interface AuthValue {
   user: User | null;
@@ -157,29 +158,16 @@ export function Login() {
 
       {/*
        * The product panel, light rather than dark: the reference puts it
-       * on a pale ground with the photograph bleeding off the right edge.
+       * on a pale ground with the equipment bleeding off the right edge.
        *
-       * The photograph is a background layer over the gradient rather
-       * than an <img>. There is no image in the repository yet, and a
-       * missing background paints nothing — so the panel reads as a
-       * deliberate gradient today, and becomes the reference the moment
-       * a file lands at web/public/login-panel.jpg. An <img> in the same
-       * place would leave a broken-image glyph.
+       * The device is drawn rather than photographed — see
+       * DeviceIllustration for why. Swapping in a real photograph later
+       * is a small edit: replace the component with a background layer
+       * carrying the image and the same mask.
        */}
-      <div className="relative hidden overflow-hidden bg-gradient-to-br from-brand-50 via-white to-brand-100/70 lg:flex lg:flex-col lg:justify-center">
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-1/2 bg-cover bg-center"
-          style={{
-            backgroundImage: "url(/login-panel.jpg)",
-            // Fades the photograph into the panel instead of ending it on
-            // a hard edge, which is what the reference does.
-            maskImage: "linear-gradient(to right, transparent, black 35%)",
-            WebkitMaskImage: "linear-gradient(to right, transparent, black 35%)",
-          }}
-          aria-hidden="true"
-        />
+      <div className="relative hidden items-center overflow-hidden bg-gradient-to-br from-brand-50 via-white to-brand-100/70 lg:flex">
 
-        <div className="relative max-w-lg px-12 py-12">
+        <div className="relative min-w-0 flex-1 py-12 pl-12 pr-6">
           <div className="flex items-center gap-3">
             <Logo className="h-11 w-11 text-brand-700" />
             <div>
@@ -188,10 +176,8 @@ export function Login() {
             </div>
           </div>
 
-          <h2 className="mt-10 text-3xl font-semibold leading-tight tracking-tight text-slate-900">
-            Smart equipment management
-            <br />
-            for better patient care
+          <h2 className="mt-10 text-balance text-3xl font-semibold leading-tight tracking-tight text-slate-900">
+            Smart equipment management for better patient care
           </h2>
           <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600">
             Track, maintain and evidence every device across the hospital — and know a service is
@@ -227,6 +213,25 @@ export function Login() {
               </li>
             ))}
           </ul>
+        </div>
+
+        {/*
+         * Its own column, and only where there is room for one. Floated
+         * over the text it crept across the headline as the window
+         * narrowed; below xl the panel is text alone, which is a
+         * composition rather than a casualty.
+         *
+         * Faded at the left edge so it settles into the panel instead of
+         * ending on a line, as the reference does.
+         */}
+        <div className="hidden shrink-0 items-center pr-4 xl:flex" aria-hidden="true">
+          <DeviceIllustration
+            className="h-[21rem] w-auto"
+            style={{
+              maskImage: "linear-gradient(to right, transparent, black 28%)",
+              WebkitMaskImage: "linear-gradient(to right, transparent, black 28%)",
+            }}
+          />
         </div>
       </div>
     </div>
