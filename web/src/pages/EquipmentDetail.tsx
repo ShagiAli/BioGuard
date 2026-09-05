@@ -122,6 +122,10 @@ export function EquipmentDetail() {
         </div>
       </div>
 
+      {(d.photoPath || (canEdit && d.photoUploadAvailable)) && (
+        <DevicePhoto device={d} canEdit={canEdit} />
+      )}
+
       <div className="mt-5">
         <Tabs
           tabs={[
@@ -589,5 +593,84 @@ function ChangeHistory({ deviceId }: { deviceId: string }) {
         </ul>
       )}
     </Card>
+  );
+}
+
+/**
+ * The device photograph.
+ *
+ * Shown through the API rather than from a stored URL: the bucket is
+ * private, so a link is signed per view and expires. That also means
+ * the image goes through the same permission check as everything else
+ * about the device.
+ *
+ * The upload control is absent where the deployment has no storage
+ * configured, rather than present and failing.
+ */
+function DevicePhoto({ device, canEdit }: { device: Detail; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const upload = async (file: File) => {
+    setError("");
+    setBusy(true);
+    try {
+      // The file is the body. The browser sets the content type from
+      // the file itself, which is what the server checks against.
+      const res = await fetch(`/api/equipment/${device.id}/photo`, {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: file,
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? "Could not upload that image.");
+      }
+      await qc.invalidateQueries({ queryKey: ["equipment", device.id] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload that image.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-4">
+      {device.photoPath ? (
+        <img
+          src={`/api/equipment/${device.id}/photo`}
+          alt={device.name}
+          className="h-28 w-28 rounded-lg border border-slate-200 bg-white object-contain p-1"
+        />
+      ) : (
+        <div className="grid h-28 w-28 place-items-center rounded-lg border border-dashed border-slate-200 text-xs text-slate-400">
+          No photo
+        </div>
+      )}
+
+      {canEdit && device.photoUploadAvailable && (
+        <div>
+          <label className="cursor-pointer rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:border-slate-300 hover:text-slate-900">
+            {busy ? "Uploading\u2026" : device.photoPath ? "Replace photo" : "Add photo"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Cleared so choosing the same file twice still fires.
+                e.target.value = "";
+                if (file) upload(file);
+              }}
+            />
+          </label>
+          <p className="mt-1 text-xs text-slate-400">JPEG, PNG or WebP, up to 5MB.</p>
+          {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
+        </div>
+      )}
+    </div>
   );
 }

@@ -262,6 +262,10 @@ model Equipment {
   lastCompletedAt   DateTime?      @db.Date
   nextDueAt         DateTime?      @db.Date
 
+  /// The object key in the photo bucket, not a URL. Links to a private
+  /// bucket are signed and expire, so storing one would store something
+  /// that stops working.
+  photoPath      String?
   installedAt    DateTime? @db.Date
   purchasedAt    DateTime? @db.Date
   purchasePrice  Decimal?  @db.Decimal(12, 2)

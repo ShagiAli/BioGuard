@@ -11,6 +11,16 @@ import { recordAudit } from "../../lib/audit.js";
 import { canSeeCosts, equipmentScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import { addDays, graceDays, pmState, toDay } from "../../scheduler/rules.js";
 import { generateToken } from "../../lib/security.js";
+import express from "express";
+import {
+  ALLOWED_PHOTO_TYPES,
+  MAX_PHOTO_BYTES,
+  deletePhoto,
+  isPhotoType,
+  putPhoto,
+  signedPhotoUrl,
+  storageConfigured,
+} from "../../lib/storage.js";
 
 export const equipmentRouter = Router();
 
@@ -226,6 +236,9 @@ equipmentRouter.get("/:id", requireAuth, async (req, res) => {
     // UI cannot drift from the rule by holding its own copy of the
     // ratio — which it previously did.
     graceWindow: graceDays(device.intervalDays, device.graceDaysOverride),
+    // Told to the client so the interface can leave the upload control
+    // out entirely rather than offering one that answers 503.
+    photoUploadAvailable: storageConfigured(),
   });
 });
 
@@ -577,3 +590,90 @@ equipmentRouter.get(
     res.json({ categories, manufacturers, departments, rooms, engineers });
   }
 );
+
+/* ------------------------------------------------------------ photos */
+
+/**
+ * Uploading a device photo.
+ *
+ * The body is the image itself rather than a multipart form, which
+ * keeps a parser dependency out of the tree: express.raw is already
+ * here, and a single file needs no envelope. The content type is the
+ * declaration, and it is checked against a list rather than trusted.
+ *
+ * Registering and photographing a device are the same kind of act -- an
+ * inventory change -- so this follows the same roles as the write
+ * endpoints rather than the servicing ones.
+ */
+equipmentRouter.post(
+  "/:id/photo",
+  requireAuth,
+  requireRole("ADMIN", "MANAGER"),
+  express.raw({ type: [...ALLOWED_PHOTO_TYPES], limit: MAX_PHOTO_BYTES }),
+  async (req, res) => {
+    if (!storageConfigured()) {
+      // Said plainly rather than as a 500: nothing is broken, the
+      // deployment simply has nowhere to put a file.
+      return res.status(503).json({ error: "Photo storage is not configured." });
+    }
+
+    const id = parseId(req.params.id);
+    if (!id) return res.status(404).json({ error: "Equipment not found." });
+
+    const contentType = req.get("content-type")?.split(";")[0]?.trim() ?? "";
+    if (!isPhotoType(contentType)) {
+      return res.status(415).json({ error: "Send a JPEG, PNG or WebP image." });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: "The image was empty." });
+    }
+
+    const device = await prisma.equipment.findFirst({
+      where: { id, ...equipmentScope(req.user!) },
+      select: { id: true, photoPath: true },
+    });
+    if (!device) return res.status(404).json({ error: "Equipment not found." });
+
+    const path = await putPhoto(device.id, req.body, contentType);
+
+    await prisma.equipment.update({ where: { id: device.id }, data: { photoPath: path } });
+
+    await recordAudit({
+      actorId: req.user!.id,
+      action: "equipment.photo_set",
+      entity: "Equipment",
+      entityId: device.id,
+    });
+
+    // The old object is replaced, not orphaned. A failure here leaves a
+    // stray file, which is not worth failing the request over.
+    if (device.photoPath) {
+      deletePhoto(device.photoPath).catch(() => {});
+    }
+
+    res.status(201).json({ url: await signedPhotoUrl(path) });
+  }
+);
+
+/**
+ * A link to the photo, signed and short-lived.
+ *
+ * Redirects rather than returning JSON so an <img src> can point
+ * straight at it, and so the signature is minted per view instead of
+ * being embedded in a page somebody might keep.
+ */
+equipmentRouter.get("/:id/photo", requireAuth, async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(404).json({ error: "Equipment not found." });
+
+  const device = await prisma.equipment.findFirst({
+    where: { id, ...equipmentScope(req.user!) },
+    select: { photoPath: true },
+  });
+  if (!device?.photoPath) return res.status(404).json({ error: "No photo." });
+
+  const url = await signedPhotoUrl(device.photoPath);
+  if (!url) return res.status(503).json({ error: "Photo storage is not configured." });
+
+  res.redirect(url);
+});

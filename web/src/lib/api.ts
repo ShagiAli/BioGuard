@@ -118,6 +118,10 @@ export interface EquipmentDetail extends EquipmentRow {
   graceWindow: number;
   installedAt: string | null;
   purchasedAt: string | null;
+  /** The object key, not a link. Links are signed per view and expire. */
+  photoPath: string | null;
+  /** False where the deployment has nowhere to put a file. */
+  photoUploadAvailable: boolean;
   warrantyEndsAt: string | null;
   purchasePrice: string | null;
   /**

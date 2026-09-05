@@ -45,11 +45,15 @@ hosting platforms use. The transaction pooler interferes with prepared
 statements unless Prisma is configured for it, so session mode is the
 one to take.
 
-**Do not enable Supabase Auth, Storage or RLS for this project.**
-BioGuard has its own authentication and its own permission model, which
-are among the things it exists to demonstrate. Use Supabase purely as a
-Postgres host — that also keeps a future move to any other provider a
-connection-string change rather than a rewrite.
+**Do not enable Supabase Auth or RLS for this project.** BioGuard has
+its own authentication and its own permission model, which are among the
+things it exists to demonstrate, and a second identity system beside it
+is a way for the two to disagree about who someone is.
+
+Storage is the exception, and only for device photos: a private bucket
+that BioGuard signs short-lived links against after running its own
+permission check. Supabase is still not deciding who may see anything.
+It is optional on both deployments — see the Vercel section.
 
 **Application: Render's free web service.** It is the only mainstream
 platform with a genuine free tier left — Railway and Fly.io both moved
@@ -193,10 +197,22 @@ Supabase's pooler.
 
 ### Supabase
 
-Use it purely as a Postgres host. Do not enable Supabase Auth, Storage
-or RLS — BioGuard has its own authentication and permission model, which
-are among the things it exists to demonstrate, and keeping Supabase to
-one job makes a future move a connection-string change.
+Use it as a Postgres host. Do not enable Supabase **Auth** or **RLS** —
+BioGuard has its own authentication and permission model, which are
+among the things it exists to demonstrate, and a second identity system
+beside it is a way for the two to disagree about who someone is.
+
+**Storage is a different matter**, and this section used to lump it in
+with the other two. Auth and RLS are permission models; storage is a
+place to put a file. Device photos use a private bucket named
+`equipment-photos`, and every read is a link BioGuard signs after
+running its own permission check, valid for an hour. Nothing is public,
+and Supabase is not deciding who may see anything — which was the actual
+concern behind the original advice.
+
+It stays optional. Leave `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+unset and the upload control is simply absent; no other behaviour
+changes.
 
 Take the **Transaction pooler** string (port 6543), not the Session
 pooler the container deployment uses. Session mode holds a server
