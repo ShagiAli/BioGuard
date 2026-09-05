@@ -156,28 +156,46 @@ export function Login() {
       </div>
 
       {/*
-       * The product panel. The design puts a photograph of a ward here;
-       * there is none in the repository, so this is a tinted panel with
-       * the same words on it. Dropping an image in is one background
-       * declaration, and it reads as deliberate meanwhile rather than as
-       * a picture that failed to load.
+       * The product panel, light rather than dark: the reference puts it
+       * on a pale ground with the photograph bleeding off the right edge.
+       *
+       * The photograph is a background layer over the gradient rather
+       * than an <img>. There is no image in the repository yet, and a
+       * missing background paints nothing — so the panel reads as a
+       * deliberate gradient today, and becomes the reference the moment
+       * a file lands at web/public/login-panel.jpg. An <img> in the same
+       * place would leave a broken-image glyph.
        */}
-      <div className="hidden flex-col justify-center bg-brand-950 p-12 lg:flex">
-        <div className="max-w-md">
+      <div className="relative hidden overflow-hidden bg-gradient-to-br from-brand-50 via-white to-brand-100/70 lg:flex lg:flex-col lg:justify-center">
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 w-1/2 bg-cover bg-center"
+          style={{
+            backgroundImage: "url(/login-panel.jpg)",
+            // Fades the photograph into the panel instead of ending it on
+            // a hard edge, which is what the reference does.
+            maskImage: "linear-gradient(to right, transparent, black 35%)",
+            WebkitMaskImage: "linear-gradient(to right, transparent, black 35%)",
+          }}
+          aria-hidden="true"
+        />
+
+        <div className="relative max-w-lg px-12 py-12">
           <div className="flex items-center gap-3">
-            <Logo className="h-11 w-11 text-brand-500" />
+            <Logo className="h-11 w-11 text-brand-700" />
             <div>
-              <div className="text-2xl font-semibold tracking-tight text-white">BioGuard</div>
-              <div className="text-xs text-brand-200/70">Protecting care. Protecting life.</div>
+              <div className="text-2xl font-semibold tracking-tight text-brand-900">BioGuard</div>
+              <div className="text-xs text-slate-500">Protecting care. Protecting life.</div>
             </div>
           </div>
 
-          <h2 className="mt-10 text-3xl font-semibold leading-tight tracking-tight text-white">
-            Equipment management for better patient care
+          <h2 className="mt-10 text-3xl font-semibold leading-tight tracking-tight text-slate-900">
+            Smart equipment management
+            <br />
+            for better patient care
           </h2>
-          <p className="mt-3 text-sm leading-relaxed text-brand-100/70">
-            Track, maintain and evidence the condition of every device in the hospital — and know
-            when a service is due before it is late.
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600">
+            Track, maintain and evidence every device across the hospital — and know a service is
+            due before it is late.
           </p>
 
           <ul className="mt-10 space-y-6">
@@ -194,17 +212,17 @@ export function Login() {
               },
               {
                 icon: ShieldCheck,
-                title: "Evidence for compliance",
-                body: "Every service, repair and status change is recorded, with who did it and when.",
+                title: "Better compliance",
+                body: "Every service, repair and status change recorded, with who did it and when.",
               },
             ].map(({ icon: Icon, title, body }) => (
               <li key={title} className="flex gap-4">
-                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/10">
-                  <Icon size={17} className="text-brand-300" />
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-700 shadow-sm">
+                  <Icon size={17} className="text-white" />
                 </span>
                 <div>
-                  <div className="text-sm font-medium text-white">{title}</div>
-                  <p className="mt-0.5 text-sm leading-relaxed text-brand-100/60">{body}</p>
+                  <div className="text-sm font-semibold text-slate-900">{title}</div>
+                  <p className="mt-0.5 max-w-sm text-sm leading-relaxed text-slate-600">{body}</p>
                 </div>
               </li>
             ))}
