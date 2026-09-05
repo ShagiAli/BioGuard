@@ -15,12 +15,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { History } from "lucide-react";
 import {
   api,
   auditChanges,
   AUDIT_ACTION_LABELS,
-  formatDate,
+  formatDateTime,
   type AuditEntry,
 } from "../lib/api";
 import {
@@ -142,13 +141,56 @@ export function Activity() {
             hint="Changing a device's status or filing maintenance will appear here."
           />
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {query.data!.rows.map((entry) => (
-              <li key={entry.id} className="px-4 py-3">
-                <AuditRow entry={entry} />
-              </li>
-            ))}
-          </ul>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">Time</th>
+                  <th className="px-4 py-2.5 font-medium">Event</th>
+                  <th className="px-4 py-2.5 font-medium">What changed</th>
+                  <th className="hidden px-4 py-2.5 font-medium lg:table-cell">About</th>
+                  <th className="hidden px-4 py-2.5 font-medium md:table-cell">Who</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {query.data!.rows.map((entry) => (
+                  <tr key={entry.id} className="align-top">
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-500">
+                      {formatDateTime(entry.createdAt)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <Badge tone={entry.action === "maintenance.recorded_rebased" ? "amber" : "slate"}>
+                        {AUDIT_ACTION_LABELS[entry.action] ?? entry.action}
+                      </Badge>
+                    </td>
+                    <td className="max-w-sm px-4 py-2.5">
+                      <AuditDiff entry={entry} />
+                    </td>
+                    <td className="hidden px-4 py-2.5 lg:table-cell">
+                      {entry.equipment ? (
+                        <Link
+                          to={`/equipment/${entry.equipment.id}`}
+                          className="text-brand-700 hover:text-brand-800"
+                        >
+                          <div>{entry.equipment.name}</div>
+                          <div className="font-mono text-xs text-slate-400">
+                            {entry.equipment.assetNo}
+                          </div>
+                        </Link>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="hidden px-4 py-2.5 text-slate-600 md:table-cell">
+                      {/* "System" rather than a blank: an unattributed row
+                          means the scheduler did it, which is information. */}
+                      {entry.actor?.fullName ?? <span className="text-slate-400">System</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {query.data && (
@@ -166,48 +208,16 @@ export function Activity() {
   );
 }
 
-function AuditRow({ entry }: { entry: AuditEntry }) {
-  const rebased = entry.action === "maintenance.recorded_rebased";
-
-  return (
-    <div className="flex items-start gap-3">
-      <History size={15} className="mt-1 shrink-0 text-slate-300" />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={rebased ? "amber" : "slate"}>
-            {AUDIT_ACTION_LABELS[entry.action] ?? entry.action}
-          </Badge>
-          {entry.equipment && (
-            <Link
-              to={`/equipment/${entry.equipment.id}`}
-              className="truncate text-sm text-slate-800 hover:text-teal-800"
-            >
-              {entry.equipment.name}{" "}
-              <span className="font-mono text-xs text-slate-400">{entry.equipment.assetNo}</span>
-            </Link>
-          )}
-        </div>
-
-        <AuditDiff entry={entry} />
-
-        <p className="mt-1 text-xs text-slate-400">
-          {formatDate(entry.createdAt)}
-          {entry.actor ? ` · ${entry.actor.fullName}` : " · system"}
-        </p>
-      </div>
-    </div>
-  );
-}
 
 /** The fields that actually moved, rendered old → new. */
 export function AuditDiff({ entry }: { entry: AuditEntry }) {
   const changes = auditChanges(entry);
   if (changes.length === 0) {
-    return <p className="mt-1 text-sm text-slate-500">No field changes recorded.</p>;
+    return <p className="text-sm text-slate-400">—</p>;
   }
 
   return (
-    <ul className="mt-1 space-y-0.5">
+    <ul className="space-y-0.5">
       {changes.map((change) => (
         <li key={change.field} className="text-sm text-slate-600">
           <span className="text-slate-500">{change.label}:</span>{" "}

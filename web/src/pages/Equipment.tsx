@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth";
 import { SavedViews } from "../components/SavedViews";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
@@ -77,6 +77,7 @@ export function Equipment() {
   // Mirrors the roles the API accepts a write from, so the button is
   // not offered to someone the server will refuse.
   const { user } = useAuth();
+  const navigate = useNavigate();
   const canRegister = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const page = Number(params.get("page") ?? 1);
@@ -324,63 +325,73 @@ export function Equipment() {
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <SortableHeader label="Asset" column="assetNo" sort={sort} dir={dir} onSort={setSort} />
-                <SortableHeader label="Device" column="name" sort={sort} dir={dir} onSort={setSort} />
-                <th className="hidden px-4 py-2.5 font-medium lg:table-cell">Location</th>
-                <th className="hidden px-4 py-2.5 font-medium md:table-cell">Engineer</th>
+                <SortableHeader label="Name" column="name" sort={sort} dir={dir} onSort={setSort} />
                 <SortableHeader
-                  label="Next PM"
-                  column="nextDueAt"
+                  label="Asset no."
+                  column="assetNo"
                   sort={sort}
                   dir={dir}
                   onSort={setSort}
                 />
+                <th className="hidden px-4 py-2.5 font-medium lg:table-cell">Department</th>
                 <SortableHeader
-                  label="State"
+                  label="Status"
                   column="operationalStatus"
                   sort={sort}
                   dir={dir}
                   onSort={setSort}
                 />
+                <th className="px-4 py-2.5 font-medium">PM status</th>
+                <SortableHeader
+                  label="Next due"
+                  column="nextDueAt"
+                  sort={sort}
+                  dir={dir}
+                  onSort={setSort}
+                />
+                <th className="hidden px-4 py-2.5 font-medium xl:table-cell">Location</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {query.data!.rows.map((d) => (
-                <tr key={d.id} className="cursor-pointer transition hover:bg-slate-100">
-                  <td className="px-4 py-2.5 font-mono text-xs text-slate-500">
-                    <Link to={`/equipment/${d.id}`} className="block">
-                      {d.assetNo}
-                    </Link>
-                  </td>
+                <tr
+                  key={d.id}
+                  onClick={() => navigate(`/equipment/${d.id}`)}
+                  className="cursor-pointer transition hover:bg-slate-50"
+                >
                   <td className="px-4 py-2.5">
-                    <Link to={`/equipment/${d.id}`} className="block">
-                      <div className="text-slate-800">{d.name}</div>
-                      <div className="text-xs text-slate-400">
-                        {d.manufacturer.name} {d.model}
-                      </div>
-                    </Link>
+                    <div className="font-medium text-brand-800">{d.name}</div>
+                    <div className="text-xs text-slate-400">
+                      {d.manufacturer.name} {d.model}
+                    </div>
                   </td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{d.assetNo}</td>
                   <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell">
                     {d.department.name}
-                    {d.room && (
-                      <div className="text-xs text-slate-400">
-                        {d.room.building.name} · Room {d.room.code}
-                      </div>
-                    )}
                   </td>
-                  <td className="hidden px-4 py-2.5 text-slate-600 md:table-cell">
-                    {d.engineer?.fullName ?? "—"}
+                  <td className="px-4 py-2.5">
+                    <Badge tone={d.operationalStatus === "OPERATIONAL" ? "emerald" : "amber"}>
+                      {STATUS_LABELS[d.operationalStatus]}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {/* Kept separate from the column beside it. A device can be
+                        under repair and overdue at once, and collapsing the two
+                        into one badge hides whichever the reader needed. */}
+                    <Badge tone={pmTone(d.pmState)}>{PM_LABELS[d.pmState]}</Badge>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-slate-600">
                     {formatDate(d.nextDueAt)}
                   </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge tone={pmTone(d.pmState)}>{PM_LABELS[d.pmState]}</Badge>
-                      {d.operationalStatus !== "OPERATIONAL" && (
-                        <Badge tone="amber">{STATUS_LABELS[d.operationalStatus]}</Badge>
-                      )}
-                    </div>
+                  <td className="hidden px-4 py-2.5 text-slate-600 xl:table-cell">
+                    {d.room ? (
+                      <>
+                        <div>{d.room.building.name}</div>
+                        <div className="text-xs text-slate-400">Room {d.room.code}</div>
+                      </>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

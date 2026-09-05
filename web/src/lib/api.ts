@@ -152,6 +152,12 @@ export interface Notification {
   readAt: string | null;
   createdAt: string;
   equipment: { id: string; name: string; assetNo: string } | null;
+  /**
+   * Set when the reminder came from a reported fault rather than the
+   * preventive schedule. The row's own foreign key is the category;
+   * there is no stored one.
+   */
+  alertId: string | null;
   recipient?: { id: string; fullName: string } | null;
 }
 
