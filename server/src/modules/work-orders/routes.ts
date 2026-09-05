@@ -47,7 +47,13 @@ const DETAIL_INCLUDE = {
     },
   },
   equipment: {
-    select: { id: true, name: true, assetNo: true, operationalStatus: true },
+    select: {
+      id: true,
+      name: true,
+      assetNo: true,
+      operationalStatus: true,
+      department: { select: { name: true } },
+    },
   },
   engineer: { select: { id: true, fullName: true } },
   closedBy: { select: { id: true, fullName: true } },

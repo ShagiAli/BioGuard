@@ -169,6 +169,8 @@ const listQuery = z
       .optional(),
     priority: z.enum(["EMERGENCY", "MEDIUM", "LOW"]).optional(),
     open: z.enum(["true", "false"]).optional(),
+    /** Narrows to what the caller is carrying, for the "My alerts" tab. */
+    mine: z.enum(["true", "false"]).optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
     ...sortSchema(SORTABLE),
@@ -190,13 +192,16 @@ alertsRouter.get("/", requireAuth, async (req, res) => {
       .json({ error: parsed.error.issues[0]?.message ?? "Unrecognised filter." });
   }
 
-  const { status, priority, open, page, pageSize, sort, dir, format } = parsed.data;
+  const { status, priority, open, mine, page, pageSize, sort, dir, format } = parsed.data;
 
   const where = {
     ...alertScope(req.user!), // scope first, always
     ...(status ? { status } : {}),
     ...(priority ? { priority } : {}),
     ...(open === "true" ? { status: { notIn: FINISHED } } : {}),
+    // Narrower than the scope, never wider: this filters within what the
+    // caller could already see rather than granting anything.
+    ...(mine === "true" ? { assignedToId: req.user!.id } : {}),
   };
 
   // Emergencies first, then oldest, so the queue reads as a work list

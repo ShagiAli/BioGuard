@@ -10,7 +10,7 @@
  * engineer sees their own and their department's, and oversight roles see
  * the estate — decided once, on the server.
  */
-import { Link, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Lock, Wrench } from "lucide-react";
 import {
@@ -43,6 +43,8 @@ interface Feed {
 
 export function WorkOrders() {
   const [params, setParams] = useSearchParams();
+
+  const navigate = useNavigate();
 
   const page = Number(params.get("page") ?? 1);
   const pageSize = Number(params.get("pageSize") ?? 20);
@@ -155,52 +157,80 @@ export function WorkOrders() {
             }
           />
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {query.data!.rows.map((wo) => {
-              const outstanding = wo.parts.filter((p) => isPartOutstanding(p.status)).length;
-              return (
-                <li key={wo.id}>
-                  <Link
-                    to={`/work-orders/${wo.id}`}
-                    className="flex items-start gap-3 px-4 py-3 transition hover:bg-slate-50"
-                  >
-                    {wo.status === "CLOSED" ? (
-                      <Lock size={15} className="mt-1 shrink-0 text-slate-300" />
-                    ) : (
-                      <Wrench size={15} className="mt-1 shrink-0 text-slate-400" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">Work order</th>
+                  <th className="px-4 py-2.5 font-medium">Equipment</th>
+                  <th className="hidden px-4 py-2.5 font-medium lg:table-cell">Department</th>
+                  <th className="px-4 py-2.5 font-medium">Priority</th>
+                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="hidden px-4 py-2.5 font-medium md:table-cell">Engineer</th>
+                  <th className="hidden px-4 py-2.5 font-medium xl:table-cell">Opened</th>
+                  <th className="px-4 py-2.5 font-medium">Parts</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {query.data!.rows.map((wo) => {
+                  const outstanding = wo.parts.filter((p) => isPartOutstanding(p.status)).length;
+                  return (
+                    <tr
+                      key={wo.id}
+                      onClick={() => navigate(`/work-orders/${wo.id}`)}
+                      className="cursor-pointer transition hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-2.5">
+                        <span className="flex items-center gap-1.5">
+                          {wo.status === "CLOSED" ? (
+                            <Lock size={13} className="shrink-0 text-slate-300" />
+                          ) : (
+                            <Wrench size={13} className="shrink-0 text-slate-400" />
+                          )}
+                          <span className="font-mono text-xs text-slate-600">{wo.number}</span>
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="text-slate-800">{wo.equipment.name}</div>
+                        <div className="font-mono text-xs text-slate-400">
+                          {wo.equipment.assetNo}
+                        </div>
+                      </td>
+                      <td className="hidden px-4 py-2.5 text-slate-600 lg:table-cell">
+                        {wo.equipment.department.name}
+                      </td>
+                      <td className="px-4 py-2.5">
                         <Badge tone={priorityTone(wo.priority)}>
                           {PRIORITY_LABELS[wo.priority]}
                         </Badge>
+                      </td>
+                      <td className="px-4 py-2.5">
                         <Badge tone={wo.status === "CLOSED" ? "emerald" : "sky"}>
                           {WORK_ORDER_STATUS_LABELS[wo.status]}
                         </Badge>
-                        {outstanding > 0 && (
-                          <Badge tone="amber">
-                            {outstanding} part{outstanding === 1 ? "" : "s"} outstanding
-                          </Badge>
+                      </td>
+                      <td className="hidden px-4 py-2.5 text-slate-600 md:table-cell">
+                        {wo.engineer.fullName}
+                      </td>
+                      <td className="hidden px-4 py-2.5 font-mono text-xs text-slate-500 xl:table-cell">
+                        {formatDate(wo.createdAt)}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {/* Only outstanding parts are worth a badge. A count of
+                            parts already fitted answers a question nobody asked
+                            of a list of live repairs. */}
+                        {outstanding > 0 ? (
+                          <Badge tone="amber">{outstanding} on order</Badge>
+                        ) : (
+                          <span className="text-slate-300">—</span>
                         )}
-                        <span className="font-mono text-xs text-slate-400">{wo.number}</span>
-                      </div>
-                      <div className="mt-1 truncate text-sm text-slate-800">
-                        {wo.equipment.name}{" "}
-                        <span className="font-mono text-xs text-slate-400">
-                          {wo.equipment.assetNo}
-                        </span>
-                      </div>
-                      <p className="truncate text-sm text-slate-600">{wo.alert.description}</p>
-                      <p className="mt-0.5 text-xs text-slate-400">
-                        {wo.engineer.fullName} · opened {formatDate(wo.createdAt)}
-                        {wo.closedAt ? ` · closed ${formatDate(wo.closedAt)}` : ""}
-                      </p>
-                    </div>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {query.data && (

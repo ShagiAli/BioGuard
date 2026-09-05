@@ -13,7 +13,8 @@
  * dashboard figure is a plain link to the alerts behind it and the two
  * cannot disagree about what they are counting.
  */
-import { Link, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "../auth";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Siren, X } from "lucide-react";
 import {
@@ -80,6 +81,10 @@ const NOT_A_FILTER = new Set(["page", "pageSize", "sort", "dir", "format"]);
 export function Alerts() {
   const [params, setParams] = useSearchParams();
 
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const mine = params.get("mine") === "true";
+
   const page = Number(params.get("page") ?? 1);
   const pageSize = Number(params.get("pageSize") ?? 20);
   const sort = params.get("sort");
@@ -115,6 +120,7 @@ export function Alerts() {
       if (priority) q.set("priority", priority);
       // "Unresolved" and an explicit status are mutually exclusive.
       if (openOnly && !status) q.set("open", "true");
+      if (mine) q.set("mine", "true");
       return api.get<Feed>(`/api/alerts?${q}`);
     },
     placeholderData: keepPreviousData,
@@ -153,6 +159,7 @@ export function Alerts() {
     if (status) q.set("status", status);
     if (priority) q.set("priority", priority);
     if (openOnly && !status) q.set("open", "true");
+    if (mine) q.set("mine", "true");
     if (sort) {
       q.set("sort", sort);
       q.set("dir", dir);
@@ -176,6 +183,35 @@ export function Alerts() {
       <p className="mt-1 text-sm text-slate-500">
         Faults reported from the wards. {query.data ? `${query.data.total} shown.` : ""}
       </p>
+
+      {/* Only offered to somebody alerts can be assigned to. For anyone
+          else the tab would always be empty, which is not a view. */}
+      {(user?.role === "ENGINEER" || user?.role === "ADMIN") && (
+        <div className="mt-4 flex items-center gap-1 border-b border-slate-200">
+          {[
+            { label: "All alerts", value: false },
+            { label: "My alerts", value: true },
+          ].map((tab) => (
+            <button
+              key={tab.label}
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                if (tab.value) next.set("mine", "true");
+                else next.delete("mine");
+                next.delete("page");
+                setParams(next);
+              }}
+              className={`-mb-px cursor-pointer border-b-2 px-3 py-2.5 text-sm transition ${
+                mine === tab.value
+                  ? "border-brand-600 font-medium text-brand-800"
+                  : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <select
@@ -254,46 +290,82 @@ export function Alerts() {
             hint="Faults reported from the wards appear in this list."
           />
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {query.data!.rows.map((alert) => (
-              <li key={alert.id}>
-                <Link
-                  to={`/alerts/${alert.id}`}
-                  className="flex items-start gap-3 px-4 py-3 transition hover:bg-slate-50"
-                >
-                  <Siren
-                    size={16}
-                    className={`mt-0.5 shrink-0 ${
-                      alert.priority === "EMERGENCY" ? "text-rose-500" : "text-slate-300"
-                    }`}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={priorityTone(alert.priority)}>
-                        {PRIORITY_LABELS[alert.priority]}
-                      </Badge>
-                      <Badge tone={alertStatusTone(alert.status)}>
-                        {ALERT_STATUS_LABELS[alert.status]}
-                      </Badge>
-                      <span className="font-mono text-xs text-slate-400">{alert.number}</span>
-                    </div>
-                    <div className="mt-1 truncate text-sm text-slate-800">
-                      {alert.equipment.name}{" "}
-                      <span className="font-mono text-xs text-slate-400">
-                        {alert.equipment.assetNo}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">Priority</th>
+                  <th className="px-4 py-2.5 font-medium">Alert</th>
+                  <th className="px-4 py-2.5 font-medium">Problem</th>
+                  <th className="hidden px-4 py-2.5 font-medium lg:table-cell">Equipment</th>
+                  <th className="hidden px-4 py-2.5 font-medium xl:table-cell">Reported</th>
+                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="hidden px-4 py-2.5 font-medium md:table-cell">Assigned to</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {query.data!.rows.map((alert) => (
+                  <tr
+                    key={alert.id}
+                    onClick={() => navigate(`/alerts/${alert.id}`)}
+                    className="cursor-pointer transition hover:bg-slate-50"
+                  >
+                    <td className="px-4 py-2.5">
+                      <span className="flex items-center gap-1.5">
+                        <Siren
+                          size={14}
+                          className={
+                            alert.priority === "EMERGENCY" ? "text-rose-500" : "text-slate-300"
+                          }
+                        />
+                        <Badge tone={priorityTone(alert.priority)}>
+                          {PRIORITY_LABELS[alert.priority]}
+                        </Badge>
                       </span>
-                    </div>
-                    <p className="truncate text-sm text-slate-600">{alert.description}</p>
-                    <p className="mt-0.5 text-xs text-slate-400">
-                      {alert.equipment.department.name} · reported by {alert.raisedBy.fullName} ·{" "}
-                      {formatDate(alert.openedAt)}
-                      {alert.assignedTo ? ` · with ${alert.assignedTo.fullName}` : ""}
-                    </p>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{alert.number}</td>
+                    <td className="max-w-xs px-4 py-2.5">
+                      <div className="truncate text-slate-800">{alert.description}</div>
+                      <div className="text-xs text-slate-400 lg:hidden">
+                        {alert.equipment.name}
+                      </div>
+                    </td>
+                    <td className="hidden px-4 py-2.5 lg:table-cell">
+                      <div className="text-slate-700">{alert.equipment.name}</div>
+                      <div className="font-mono text-xs text-slate-400">
+                        {alert.equipment.assetNo} · {alert.equipment.department.name}
+                      </div>
+                    </td>
+                    <td className="hidden px-4 py-2.5 xl:table-cell">
+                      <div className="font-mono text-xs text-slate-600">
+                        {formatDate(alert.openedAt)}
+                      </div>
+                      <div className="truncate text-xs text-slate-400">
+                        {alert.raisedBy.fullName}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge tone={alertStatusTone(alert.status)}>
+                          {ALERT_STATUS_LABELS[alert.status]}
+                        </Badge>
+                        {/* The response window, where it has already been missed.
+                            Silent otherwise: a badge on every row is one nobody reads. */}
+                        {alert.sla.breached && !alert.sla.respondedAt && (
+                          <span className="font-mono text-[0.65rem] text-rose-600">
+                            past response target
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="hidden px-4 py-2.5 text-slate-600 md:table-cell">
+                      {alert.assignedTo?.fullName ?? <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {query.data && (

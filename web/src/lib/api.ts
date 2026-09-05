@@ -466,7 +466,13 @@ export interface WorkOrder {
     raisedBy: { id: string; fullName: string };
   };
   parts: WorkOrderPart[];
-  equipment: { id: string; name: string; assetNo: string; operationalStatus: OperationalStatus };
+  equipment: {
+    id: string;
+    name: string;
+    assetNo: string;
+    operationalStatus: OperationalStatus;
+    department: { name: string };
+  };
   engineer: { id: string; fullName: string };
   closedBy: { id: string; fullName: string } | null;
 }
