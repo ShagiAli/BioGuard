@@ -1,18 +1,19 @@
 /**
  * A patient monitor on a pole above an infusion pump.
  *
- * Decoration for the sign-in panel, standing in for the photograph the
- * design puts there. Drawn rather than photographed, and drawn flat on
- * purpose: hand-authored SVG reaching for realism looks worse the harder
- * it tries, where a technical illustration at this size simply works.
+ * Stands in for the photograph the design puts in the sign-in panel.
+ * Drawn with a single light source from the top left: every body panel
+ * carries a gradient, every recess a darker edge, so the plastic reads
+ * as moulded rather than as flat shapes.
  *
- * Generic on purpose too. The devices in the reference are identifiable
+ * Generic on purpose. The devices in the reference are identifiable
  * products; this is the same pair of machines in the same arrangement
  * with no maker's marks on either.
  *
- * The trace is the tell that this belongs to BioGuard rather than to a
- * stock library: the same stroke weight and rounded ends as the pulse
- * cut out of the mark.
+ * The screen keeps clinical colours rather than brand ones — green ECG,
+ * cyan saturation, amber respiration — because that is what these
+ * machines actually look like, and a monitor recoloured to match a
+ * palette stops reading as a monitor.
  */
 export function DeviceIllustration({
   className = "",
@@ -24,118 +25,238 @@ export function DeviceIllustration({
 }) {
   return (
     <svg
-      viewBox="0 0 300 430"
+      viewBox="0 0 340 520"
       className={className}
       style={style}
       fill="none"
       aria-hidden="true"
       focusable="false"
     >
-      {/* Pole, drawn first so both machines sit on top of it. */}
-      <rect x="145" y="112" width="9" height="260" rx="4" className="fill-slate-300" />
+      <defs>
+        {/* Light from the top left, so every panel is lit the same way. */}
+        <linearGradient id="dev-body" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="55%" stopColor="#eef2f6" />
+          <stop offset="100%" stopColor="#d3dbe4" />
+        </linearGradient>
+        <linearGradient id="dev-side" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#c3ccd7" />
+          <stop offset="100%" stopColor="#9aa6b4" />
+        </linearGradient>
+        {/* A pole is a cylinder: bright down one side, dark down the other. */}
+        <linearGradient id="dev-pole" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#94a3b8" />
+          <stop offset="35%" stopColor="#f1f5f9" />
+          <stop offset="100%" stopColor="#8f9caa" />
+        </linearGradient>
+        <linearGradient id="dev-screen" x1="0" y1="0" x2="0.4" y2="1">
+          <stop offset="0%" stopColor="#111d2e" />
+          <stop offset="100%" stopColor="#060c16" />
+        </linearGradient>
+        <linearGradient id="dev-knob" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#f8fafc" />
+          <stop offset="100%" stopColor="#aab6c4" />
+        </linearGradient>
+        {/* The glass catches the light across one corner. */}
+        <linearGradient id="dev-glare" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.10" />
+          <stop offset="45%" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+        <radialGradient id="dev-shadow">
+          <stop offset="0%" stopColor="#0f172a" stopOpacity="0.16" />
+          <stop offset="100%" stopColor="#0f172a" stopOpacity="0" />
+        </radialGradient>
+      </defs>
 
-      {/* ---------------------------------------------------- monitor */}
+      {/* Contact shadow, so the stand sits on something. */}
+      <ellipse cx="170" cy="497" rx="104" ry="14" fill="url(#dev-shadow)" />
+
+      {/* Pole, behind everything it carries. */}
+      <rect x="162" y="150" width="12" height="330" rx="6" fill="url(#dev-pole)" />
+
+      {/* ------------------------------------------------------ monitor */}
+      {/* The case has depth: a darker slab behind the face. */}
+      <rect x="52" y="30" width="228" height="164" rx="12" fill="url(#dev-side)" />
       <rect
         x="44"
-        y="16"
-        width="212"
-        height="138"
+        y="22"
+        width="228"
+        height="164"
         rx="12"
-        className="fill-slate-100 stroke-slate-300"
-        strokeWidth="2"
+        fill="url(#dev-body)"
+        stroke="#c2ccd8"
+        strokeWidth="1.5"
       />
-      <rect x="57" y="29" width="186" height="102" rx="6" className="fill-slate-800" />
 
-      {/* Mount joining the monitor to the pole. */}
-      <rect x="133" y="152" width="34" height="13" rx="4" className="fill-slate-300" />
+      {/* Screen, recessed behind a dark bezel. */}
+      <rect x="56" y="34" width="172" height="122" rx="5" fill="#243244" />
+      <rect x="60" y="38" width="164" height="114" rx="3" fill="url(#dev-screen)" />
 
-      {/* ECG: flat, a small p wave, the QRS spike, then a t wave. */}
+      {/* Faint graticule, as these screens carry. */}
+      <g stroke="#1e3a5f" strokeWidth="0.5" opacity="0.55">
+        <path d="M60 66 H224 M60 94 H224 M60 122 H224" />
+      </g>
+
+      {/* ECG. Flat, a small p wave, the QRS spike, a t wave, and repeat. */}
       <path
-        d="M69 88 h16 l5 -7 l5 7 h9 l4 11 l6 -35 l6 30 l4 -6 h10 l7 -9 l7 9 h14"
-        className="stroke-brand-400"
-        strokeWidth="2.5"
+        d="M66 62 h14 l4 -6 l4 6 h8 l3 8 l5 -26 l5 22 l3 -4 h9 l5 -7 l5 7 h12
+           l4 -6 l4 6 h8 l3 8 l5 -26 l5 22 l3 -4 h9"
+        stroke="#4ade80"
+        strokeWidth="1.8"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* A second, quieter channel, as a real monitor carries. */}
+      {/* Pleth: the rounded, lagging wave a saturation probe draws. */}
       <path
-        d="M69 116 q9 -11 18 0 t18 0 t18 0 t18 0"
-        className="stroke-sky-400/50"
-        strokeWidth="2"
+        d="M66 100 q6 -14 12 -2 t9 4 q7 -16 13 -3 t9 5 q7 -16 13 -3 t9 5 q7 -16 13 -3 t9 5"
+        stroke="#22d3ee"
+        strokeWidth="1.6"
         strokeLinecap="round"
       />
+      {/* Respiration: slower and shallower than the two above it. */}
+      <path
+        d="M66 136 q14 -12 28 0 t28 0 t28 0 t28 0"
+        stroke="#fbbf24"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        opacity="0.85"
+      />
 
-      {/*
-       * Vitals, in three label-and-value pairs on an even rhythm. The
-       * numbers are plausible rather than decorative — a resting adult,
-       * breathing room air.
-       */}
-      <g fontFamily="ui-monospace, SFMono-Regular, monospace" textAnchor="end">
-        {[
-          { label: "HR", value: "72", y: 56, tone: "fill-brand-300" },
-          { label: "SpO₂", value: "98", y: 88, tone: "fill-sky-300" },
-          { label: "RR", value: "16", y: 120, tone: "fill-amber-300" },
-        ].map((vital) => (
-          <g key={vital.label}>
-            <text x="232" y={vital.y - 15} fontSize="8" className="fill-slate-500">
-              {vital.label}
-            </text>
-            <text x="232" y={vital.y} fontSize="21" fontWeight="600" className={vital.tone}>
-              {vital.value}
-            </text>
-          </g>
-        ))}
+      {/* Readouts. Plausible for a resting adult breathing room air. */}
+      <g fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" textAnchor="end">
+        <text x="218" y="52" fontSize="7" fill="#4ade80" opacity="0.75">
+          HR bpm
+        </text>
+        <text x="218" y="74" fontSize="24" fontWeight="700" fill="#4ade80">
+          72
+        </text>
+        <text x="218" y="88" fontSize="7" fill="#22d3ee" opacity="0.75">
+          SpO₂ %
+        </text>
+        <text x="218" y="108" fontSize="21" fontWeight="700" fill="#22d3ee">
+          98
+        </text>
+        <text x="218" y="122" fontSize="7" fill="#fbbf24" opacity="0.75">
+          RR
+        </text>
+        <text x="218" y="141" fontSize="18" fontWeight="700" fill="#fbbf24">
+          16
+        </text>
       </g>
 
-      {/* ------------------------------------------------ infusion pump */}
-      <rect
-        x="84"
-        y="192"
-        width="130"
-        height="126"
-        rx="10"
-        className="fill-slate-100 stroke-slate-300"
-        strokeWidth="2"
-      />
-      <rect x="96" y="204" width="106" height="32" rx="5" className="fill-slate-800" />
+      {/* Glass, catching the light across the top-left corner. */}
+      <rect x="60" y="38" width="164" height="114" rx="3" fill="url(#dev-glare)" />
 
-      {/* Rate and volume, the two figures a pump actually shows. */}
-      <g fontFamily="ui-monospace, SFMono-Regular, monospace">
-        <text x="105" y="226" fontSize="14" fontWeight="600" className="fill-brand-300">
+      {/* Controls down the right cheek: a rotary and three keys. */}
+      <circle cx="250" cy="60" r="14" fill="url(#dev-knob)" stroke="#b3bece" strokeWidth="1.5" />
+      <circle cx="250" cy="60" r="6" fill="#cbd5e1" />
+      <rect x="240" y="88" width="20" height="9" rx="3" fill="#dde3ea" stroke="#c2ccd8" />
+      <rect x="240" y="103" width="20" height="9" rx="3" fill="#dde3ea" stroke="#c2ccd8" />
+      <rect x="240" y="118" width="20" height="9" rx="3" fill="#4ade80" opacity="0.85" />
+
+      {/* Soft keys under the screen, and a vent. */}
+      <g fill="#dde3ea" stroke="#c7d0db" strokeWidth="1">
+        <rect x="62" y="164" width="26" height="12" rx="3" />
+        <rect x="94" y="164" width="26" height="12" rx="3" />
+        <rect x="126" y="164" width="26" height="12" rx="3" />
+        <rect x="158" y="164" width="26" height="12" rx="3" />
+      </g>
+      <g stroke="#c7d0db" strokeWidth="1.5" strokeLinecap="round">
+        <path d="M196 168 h22 M196 172 h22" />
+      </g>
+
+      {/* Mount joining the monitor to the pole. */}
+      <rect x="152" y="186" width="32" height="16" rx="4" fill="url(#dev-side)" />
+      <rect x="156" y="186" width="24" height="16" rx="4" fill="url(#dev-body)" />
+
+      {/* ------------------------------------------------- infusion pump */}
+      <rect x="98" y="248" width="150" height="152" rx="12" fill="url(#dev-side)" />
+      <rect
+        x="90"
+        y="240"
+        width="150"
+        height="152"
+        rx="12"
+        fill="url(#dev-body)"
+        stroke="#c2ccd8"
+        strokeWidth="1.5"
+      />
+
+      {/* Rate display. */}
+      <rect x="100" y="250" width="130" height="38" rx="4" fill="#243244" />
+      <rect x="103" y="253" width="124" height="32" rx="3" fill="url(#dev-screen)" />
+      <g fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace">
+        <text x="110" y="270" fontSize="7" fill="#94a3b8">
+          RATE
+        </text>
+        <text x="110" y="281" fontSize="13" fontWeight="700" fill="#4ade80">
           125
         </text>
-        <text x="139" y="226" fontSize="8" className="fill-slate-500">
+        <text x="140" y="281" fontSize="7" fill="#64748b">
           mL/h
+        </text>
+        <text x="196" y="270" fontSize="7" fill="#94a3b8">
+          VTBI
+        </text>
+        <text x="196" y="281" fontSize="10" fontWeight="600" fill="#22d3ee">
+          250
         </text>
       </g>
 
-      {/* Keypad. One key lit, so the machine reads as running. */}
-      {[0, 1, 2].map((row) =>
-        [0, 1, 2].map((col) => (
-          <rect
-            key={`${row}-${col}`}
-            x={99 + col * 36}
-            y={248 + row * 22}
-            width="30"
-            height="16"
-            rx="3"
-            className={row === 2 && col === 1 ? "fill-brand-600" : "fill-slate-200"}
-          />
-        ))
-      )}
+      {/* The cassette door, recessed with a handle down its edge. */}
+      <rect x="100" y="296" width="52" height="84" rx="6" fill="#dfe5ec" stroke="#c2ccd8" />
+      <rect x="106" y="302" width="40" height="72" rx="4" fill="#eef2f6" stroke="#cfd8e2" />
+      <rect x="140" y="326" width="4" height="24" rx="2" fill="#b3bece" />
+      {/* Running, and saying so. */}
+      <circle cx="112" cy="312" r="3.5" fill="#4ade80" />
 
-      {/* Clamp joining the pump to the pole. */}
-      <rect x="207" y="240" width="14" height="30" rx="4" className="fill-slate-300" />
+      {/* Keypad. Green starts it, red stops it, as they always do. */}
+      <g stroke="#c2ccd8" strokeWidth="1">
+        {[0, 1, 2].map((row) =>
+          [0, 1].map((col) => (
+            <rect
+              key={`k-${row}-${col}`}
+              x={164 + col * 34}
+              y={298 + row * 24}
+              width="28"
+              height="18"
+              rx="4"
+              fill="#e6ebf1"
+            />
+          ))
+        )}
+      </g>
+      <rect x="164" y="370" width="28" height="18" rx="4" fill="#22c55e" />
+      <rect x="198" y="370" width="28" height="18" rx="4" fill="#ef4444" />
 
-      {/* --------------------------------------------------------- base */}
+      {/* Clamp holding the pump to the pole. */}
+      <rect x="236" y="300" width="16" height="40" rx="5" fill="url(#dev-side)" />
+      <rect x="238" y="302" width="12" height="36" rx="4" fill="url(#dev-body)" />
+
+      {/* Giving set, leaving the pump and dropping out of frame. */}
       <path
-        d="M148 372 L108 400 M152 372 L192 400"
-        className="stroke-slate-300"
-        strokeWidth="10"
+        d="M126 380 q-4 30 8 48 t2 40"
+        stroke="#cbd5e1"
+        strokeWidth="2.5"
         strokeLinecap="round"
+        opacity="0.8"
       />
-      <circle cx="104" cy="406" r="9" className="fill-slate-200 stroke-slate-400" strokeWidth="2" />
-      <circle cx="196" cy="406" r="9" className="fill-slate-200 stroke-slate-400" strokeWidth="2" />
+
+      {/* ---------------------------------------------------------- base */}
+      <ellipse cx="168" cy="474" rx="22" ry="8" fill="url(#dev-side)" />
+      {/* Five legs, foreshortened, so the base sits in perspective. */}
+      <g stroke="url(#dev-pole)" strokeWidth="9" strokeLinecap="round">
+        <path d="M168 476 L106 470" />
+        <path d="M168 476 L230 470" />
+        <path d="M168 478 L134 492" />
+        <path d="M168 478 L202 492" />
+      </g>
+      <g fill="#94a3b8">
+        <ellipse cx="102" cy="471" rx="8" ry="6" />
+        <ellipse cx="234" cy="471" rx="8" ry="6" />
+        <ellipse cx="130" cy="494" rx="8" ry="6" />
+        <ellipse cx="206" cy="494" rx="8" ry="6" />
+      </g>
     </svg>
   );
 }
