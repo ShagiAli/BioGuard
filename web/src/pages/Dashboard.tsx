@@ -37,7 +37,7 @@ import {
   type WorkOrderSummary,
 } from "../lib/api";
 import { useAuth } from "../auth";
-import { Badge, Card, ErrorNote, Spinner, pmTone } from "../components/ui";
+import { Badge, Card, ErrorNote, pmTone } from "../components/ui";
 
 interface AuditRow {
   id: string;
@@ -79,7 +79,9 @@ export function Dashboard() {
   const closed = useQuery({
     queryKey: ["work-orders", "recently-closed"],
     queryFn: () =>
-      api.get<{ rows: WorkOrder[] }>("/api/work-orders?archived=true&pageSize=5&sort=createdAt&dir=desc"),
+      api.get<{ rows: WorkOrder[] }>(
+        "/api/work-orders?archived=true&pageSize=5&sort=createdAt&dir=desc"
+      ),
   });
 
   // Activity is role-gated on the server, so it is not asked for at all
@@ -90,13 +92,24 @@ export function Dashboard() {
     enabled: oversees,
   });
 
-  if (summary.isLoading) return <Spinner label="Loading the maintenance position" />;
-  if (summary.isError) return <ErrorNote message="Could not load the dashboard." />;
-
-  const s = summary.data!;
+  /*
+   * No spinner in front of the page.
+   *
+   * The heading, the date and the card frames do not depend on the
+   * summary, and holding them back put a database round-trip in front of
+   * the first thing anyone sees. That paragraph under the heading is the
+   * largest element on the page, so it was the largest paint, so it was
+   * the score — six seconds of it, on a page whose layout was known
+   * before the request went out.
+   *
+   * The frames render now and the figures land in them. That is also the
+   * more honest picture: the shape of the answer is known, the numbers
+   * are not yet.
+   */
+  const s = summary.data;
   const a = alerts.data;
   const w = work.data;
-  const operationalShare = s.total > 0 ? ((s.operational / s.total) * 100).toFixed(1) : "0.0";
+  const operationalShare = s && s.total > 0 ? ((s.operational / s.total) * 100).toFixed(1) : null;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -115,49 +128,53 @@ export function Dashboard() {
 
       <SectionLabel>Preventive maintenance</SectionLabel>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Stat
-          label="Total equipment"
-          value={s.total}
-          icon={Boxes}
-          tone="slate"
-          to="/equipment"
-          action="View equipment"
-        />
-        <Stat
-          label="Operational"
-          value={s.operational}
-          hint={`${operationalShare}% of total`}
-          icon={CheckCircle2}
-          tone="emerald"
-          to="/equipment?operationalStatus=OPERATIONAL"
-          action="View operational"
-        />
-        <Stat
-          label="Due within 30 days"
-          value={s.due30}
-          icon={Clock}
-          tone="amber"
-          to="/equipment?pm=DUE_30"
-          action="View due soon"
-        />
-        <Stat
-          label="Overdue"
-          value={s.overdue}
-          icon={AlertTriangle}
-          tone="rose"
-          to="/equipment?pm=OVERDUE"
-          action="View overdue"
-        />
-        <Stat
-          label="Critical overdue"
-          value={s.criticalOverdue}
-          icon={Siren}
-          tone="rose"
-          to="/equipment?pm=OVERDUE&criticality=CRITICAL"
-          action="View critical"
-        />
-      </div>
+      {summary.isError ? (
+        <ErrorNote message="Could not load the maintenance position." />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <Stat
+            label="Total equipment"
+            value={s?.total}
+            icon={Boxes}
+            tone="slate"
+            to="/equipment"
+            action="View equipment"
+          />
+          <Stat
+            label="Operational"
+            value={s?.operational}
+            hint={operationalShare ? `${operationalShare}% of total` : undefined}
+            icon={CheckCircle2}
+            tone="emerald"
+            to="/equipment?operationalStatus=OPERATIONAL"
+            action="View operational"
+          />
+          <Stat
+            label="Due within 30 days"
+            value={s?.due30}
+            icon={Clock}
+            tone="amber"
+            to="/equipment?pm=DUE_30"
+            action="View due soon"
+          />
+          <Stat
+            label="Overdue"
+            value={s?.overdue}
+            icon={AlertTriangle}
+            tone="rose"
+            to="/equipment?pm=OVERDUE"
+            action="View overdue"
+          />
+          <Stat
+            label="Critical overdue"
+            value={s?.criticalOverdue}
+            icon={Siren}
+            tone="rose"
+            to="/equipment?pm=OVERDUE&criticality=CRITICAL"
+            action="View critical"
+          />
+        </div>
+      )}
 
       <SectionLabel>Corrective work</SectionLabel>
 
@@ -169,7 +186,12 @@ export function Dashboard() {
             to="/alerts?priority=EMERGENCY"
             dot="bg-rose-500"
           />
-          <CountRow label="Medium" value={a?.medium} to="/alerts?priority=MEDIUM" dot="bg-amber-500" />
+          <CountRow
+            label="Medium"
+            value={a?.medium}
+            to="/alerts?priority=MEDIUM"
+            dot="bg-amber-500"
+          />
           <CountRow label="Low" value={a?.low} to="/alerts?priority=LOW" dot="bg-emerald-500" />
           <CountRow
             label="Waiting for assignment"
@@ -189,11 +211,7 @@ export function Dashboard() {
             icon={PackageSearch}
           />
           <CountRow label="Parts on order" value={w?.partsOrdered} to="/work-orders" icon={Clock} />
-          <Total
-            label="Closed work orders"
-            value={w?.closed}
-            to="/work-orders?archived=true"
-          />
+          <Total label="Closed work orders" value={w?.closed} to="/work-orders?archived=true" />
         </Panel>
 
         <Panel title="Recently closed" to="/work-orders?archived=true" linkLabel="View archive">
@@ -361,7 +379,8 @@ function Stat({
   action,
 }: {
   label: string;
-  value: number;
+  /** Undefined until the summary lands; the card reserves the space. */
+  value: number | undefined;
   hint?: string;
   icon: typeof Boxes;
   tone: keyof typeof STAT_TONES;
@@ -377,8 +396,14 @@ function Stat({
         <span className="text-sm text-slate-500">{label}</span>
         <Icon size={16} className={STAT_TONES[tone]} />
       </div>
-      <span className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-slate-900">
-        {value}
+      <span className="mt-2 flex h-9 items-center">
+        {value === undefined ? (
+          <span className="h-7 w-14 animate-pulse rounded bg-slate-100" aria-hidden="true" />
+        ) : (
+          <span className="text-3xl font-semibold tabular-nums tracking-tight text-slate-900">
+            {value}
+          </span>
+        )}
       </span>
       <span className="mt-0.5 text-xs text-slate-400">{hint ?? " "}</span>
       <span className="mt-3 flex items-center gap-0.5 text-xs text-brand-700 group-hover:text-brand-800">
