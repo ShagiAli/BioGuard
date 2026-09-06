@@ -237,7 +237,7 @@ cd server
 cp .env.example .env               # then set SESSION_SECRET
 npm install
 npm run db:migrate                 # name it "init"
-npm run db:seed                    # 184 devices; prints logins once
+npm run db:seed                    # 20 devices; prints logins once
 npm run dev                        # API on :4000
 
 cd ../web

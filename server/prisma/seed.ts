@@ -1,6 +1,10 @@
 /**
- * Seeds a fictional hospital. Deterministic, so the demo shows the same
- * numbers every time it is reset.
+ * Seeds a fictional hospital.
+ *
+ * The fleet is twenty devices, each one written down with the dates that
+ * put it where it is. An earlier version rolled 184 from a seeded PRNG,
+ * which was reproducible but not meaningful: the same arbitrary numbers
+ * every time rather than a position anyone chose. See DEVICES below.
  *
  * No password is hardcoded. If SEED_ADMIN_PASSWORD and
  * SEED_DEMO_PASSWORD are unset, random ones are generated and printed
@@ -17,18 +21,6 @@ import { generateToken, hashPassword } from "../src/lib/security.js";
 const HOSPITAL = "Northfield Teaching Hospital";
 const TODAY = new Date();
 
-function mulberry32(seed: number) {
-  return () => {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-const rnd = mulberry32(20260814);
-const pick = <T>(list: readonly T[]): T => list[Math.floor(rnd() * list.length)]!;
 const day = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 const addDays = (d: Date, n: number) => new Date(day(d).getTime() + n * 86_400_000);
 
@@ -202,7 +194,7 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
+  const alertsHead = await prisma.user.create({
     data: {
       email: "alerts@bioguard.local",
       passwordHash: await hashPassword(demoPassword),
@@ -211,7 +203,7 @@ async function main() {
     },
   });
 
-  await prisma.user.create({
+  const nurse = await prisma.user.create({
     data: {
       email: "nurse@bioguard.local",
       passwordHash: await hashPassword(demoPassword),
@@ -222,60 +214,438 @@ async function main() {
   });
 
   // --- equipment ---------------------------------------------------
-  const statuses = [
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "OPERATIONAL",
-    "UNDER_REPAIR",
-    "AWAITING_PARTS",
-    "OUT_OF_SERVICE",
+  /**
+   * Twenty devices, written down rather than rolled.
+   *
+   * The previous seed generated 184 at random. It filled the screens,
+   * but it meant nothing: the overdue list was whatever the dice said,
+   * and the ward with the worst backlog changed on every reset. Twenty
+   * named devices with chosen dates make the demo legible — every figure
+   * on the dashboard traces to a device you can point at, and the ones
+   * that are off the floor carry the alert and the work order that put
+   * them there.
+   *
+   * `sincePM` is days since the last preventive service. Subtract it
+   * from the category interval to read the device's position: negative
+   * is overdue, and that subtraction is the whole dataset. Everything is
+   * relative to the day the seed runs, so the shape holds however long
+   * the demo sits between resets — five overdue, five due inside a
+   * month, six devices unavailable.
+   */
+  const DEVICES = [
+    // Overdue. The first is the one that should hurt: a ventilator, out
+    // of service, two months past a ninety-day service.
+    {
+      name: "Ventilator",
+      dept: "Intensive care",
+      room: 1,
+      mfr: "Dräger",
+      model: "Evita V600",
+      serial: "ARZM-44718",
+      status: "OUT_OF_SERVICE",
+      sincePM: 147,
+      installed: 2190,
+      price: 41200,
+      warranty: -240,
+      fault: {
+        priority: "EMERGENCY",
+        status: "IN_PROGRESS",
+        raisedDaysAgo: 9,
+        ackHours: 1,
+        engineer: 0,
+        description:
+          "Ventilator failed self-test on start-up and will not deliver volume. Taken out of service and swapped for the spare.",
+        wo: {
+          status: "AWAITING_PARTS",
+          findings:
+            "Self-test fails at the flow sensor stage. Sensor reads zero against a known flow.",
+          diagnosis:
+            "Expiratory flow sensor assembly has failed. Not field-repairable — needs the sealed unit.",
+          part: {
+            name: "Expiratory flow sensor assembly",
+            partNumber: "DR-8412-EX",
+            status: "ORDERED",
+            orderedDaysAgo: 6,
+          },
+        },
+      },
+    },
+    {
+      name: "Defibrillator",
+      dept: "Emergency",
+      room: 2,
+      mfr: "Philips",
+      model: "HeartStart XL+",
+      serial: "PH-99210",
+      status: "OPERATIONAL",
+      sincePM: 118,
+      installed: 1460,
+      price: 12800,
+      warranty: 120,
+    },
+    {
+      name: "Infant incubator",
+      dept: "Neonatal ICU",
+      room: 1,
+      mfr: "Getinge",
+      model: "Isolette 8000",
+      serial: "GT-31088",
+      status: "AWAITING_PARTS",
+      sincePM: 104,
+      installed: 1825,
+      price: 28600,
+      warranty: -95,
+      fault: {
+        priority: "EMERGENCY",
+        status: "ASSIGNED",
+        raisedDaysAgo: 4,
+        ackHours: 2,
+        engineer: 3,
+        description:
+          "Incubator will not hold set temperature — drifts 1.5°C low over an hour. Infant moved to the adjacent unit.",
+        wo: {
+          status: "AWAITING_PARTS",
+          findings:
+            "Chamber heats slowly and undershoots setpoint. Air probe agrees with an external thermometer, so the reading is not the problem.",
+          diagnosis: "Heater element degraded. Replacement quoted at eight working days.",
+          part: {
+            name: "Heater element, 230V",
+            partNumber: "GT-HE-230",
+            status: "REQUESTED",
+            requestedDaysAgo: 3,
+          },
+        },
+      },
+    },
+    {
+      name: "Dialysis machine",
+      dept: "Dialysis unit",
+      room: 3,
+      mfr: "Fresenius",
+      model: "5008S CorDiax",
+      serial: "FR-70452",
+      status: "OPERATIONAL",
+      sincePM: 131,
+      installed: 1095,
+      price: 24900,
+      warranty: 210,
+    },
+    {
+      name: "Autoclave",
+      dept: "Operating theatres",
+      room: 2,
+      mfr: "Getinge",
+      model: "HS66",
+      serial: "GT-55031",
+      status: "UNDER_REPAIR",
+      sincePM: 189,
+      installed: 2920,
+      price: 47500,
+      warranty: -640,
+      fault: {
+        priority: "MEDIUM",
+        status: "IN_PROGRESS",
+        raisedDaysAgo: 2,
+        ackHours: 3,
+        engineer: 1,
+        description:
+          "Cycle aborting at the drying stage with a door-seal fault. Theatre list moved to the second autoclave.",
+        wo: {
+          status: "IN_REPAIR",
+          findings: "Door gasket has taken a set and no longer seals under vacuum.",
+          diagnosis: "Gasket replacement and a vacuum-hold test. Spare held in stores.",
+        },
+      },
+    },
+
+    // Due inside thirty days. Nothing wrong with these yet — they are
+    // what the reminder engine exists to catch before the group above
+    // happens again.
+    {
+      name: "Anaesthesia machine",
+      dept: "Operating theatres",
+      room: 1,
+      mfr: "Dräger",
+      model: "Perseus A500",
+      serial: "DR-11723",
+      status: "OPERATIONAL",
+      sincePM: 87,
+      installed: 1460,
+      price: 68400,
+      warranty: 45,
+    },
+    {
+      name: "Patient monitor",
+      dept: "Intensive care",
+      room: 2,
+      mfr: "Philips",
+      model: "IntelliVue MX750",
+      serial: "PH-40217",
+      status: "OPERATIONAL",
+      sincePM: 173,
+      installed: 1095,
+      price: 14300,
+      warranty: 300,
+    },
+    {
+      name: "Infusion pump",
+      dept: "Paediatrics",
+      room: 4,
+      mfr: "B. Braun",
+      model: "Infusomat Space",
+      serial: "BB-62094",
+      status: "OPERATIONAL",
+      sincePM: 166,
+      installed: 730,
+      price: 2450,
+      warranty: 400,
+    },
+    {
+      name: "X-ray unit",
+      dept: "Radiology",
+      room: 1,
+      mfr: "Siemens Healthineers",
+      model: "Ysio Max",
+      serial: "SI-20884",
+      status: "OPERATIONAL",
+      sincePM: 344,
+      installed: 2555,
+      price: 186000,
+      warranty: -420,
+    },
+    {
+      name: "Syringe pump",
+      dept: "Neonatal ICU",
+      room: 2,
+      mfr: "B. Braun",
+      model: "Perfusor Space",
+      serial: "BB-73310",
+      status: "OPERATIONAL",
+      sincePM: 152,
+      installed: 1095,
+      price: 1980,
+      warranty: 165,
+    },
+
+    // Off the floor for reasons that have nothing to do with the service
+    // schedule. A device can be broken and perfectly up to date.
+    {
+      name: "Ultrasound scanner",
+      dept: "Radiology",
+      room: 3,
+      mfr: "GE Healthcare",
+      model: "Logiq E10",
+      serial: "GE-58127",
+      status: "UNDER_REPAIR",
+      sincePM: 96,
+      installed: 1460,
+      price: 92700,
+      warranty: 60,
+      fault: {
+        priority: "MEDIUM",
+        status: "IN_PROGRESS",
+        raisedDaysAgo: 5,
+        ackHours: 6,
+        engineer: 2,
+        description:
+          "Intermittent dropout on the curvilinear probe — image freezes for a second or two mid-scan.",
+        wo: {
+          status: "INVESTIGATING",
+          findings:
+            "Fault follows the probe rather than the port, so the console is likely fine. Swapped to a loan probe to confirm.",
+        },
+      },
+    },
+    {
+      name: "ECG machine",
+      dept: "Cardiology",
+      room: 2,
+      mfr: "Nihon Kohden",
+      model: "ECG-2550",
+      serial: "NK-13905",
+      status: "AWAITING_PARTS",
+      sincePM: 41,
+      installed: 1825,
+      price: 6200,
+      warranty: -310,
+      fault: {
+        priority: "LOW",
+        status: "ASSIGNED",
+        raisedDaysAgo: 11,
+        ackHours: 20,
+        engineer: 1,
+        description: "Two chest leads reading noise. Traced to the patient cable, not the machine.",
+        wo: {
+          status: "AWAITING_PARTS",
+          findings: "Cable continuity fails on V3 and V4. Machine passes on a known-good cable.",
+          diagnosis: "Replace the ten-lead patient cable.",
+          part: {
+            name: "10-lead patient cable",
+            partNumber: "NK-PC-2550",
+            status: "ORDERED",
+            orderedDaysAgo: 7,
+          },
+        },
+      },
+    },
+    // Raised and never picked up. The SLA clock on this one has been
+    // running for two days, which is the case the alert queue exists to
+    // make visible.
+    {
+      name: "Suction unit",
+      dept: "Emergency",
+      room: 5,
+      mfr: "Medtronic",
+      model: "SU-200",
+      serial: "MD-84663",
+      status: "OUT_OF_SERVICE",
+      sincePM: 210,
+      installed: 2190,
+      price: 1150,
+      warranty: -730,
+      fault: {
+        priority: "MEDIUM",
+        status: "OPEN",
+        raisedDaysAgo: 2,
+        description:
+          "No suction at the wall unit. Canister seals look intact. Bay taken out of use.",
+      },
+    },
+
+    // Healthy, spread across the cycle so the fleet does not read as a
+    // hospital where everything is broken.
+    {
+      name: "Ventilator",
+      dept: "Intensive care",
+      room: 3,
+      mfr: "Dräger",
+      model: "Evita V600",
+      serial: "ARZM-44720",
+      status: "OPERATIONAL",
+      sincePM: 22,
+      installed: 1095,
+      price: 41200,
+      warranty: 480,
+    },
+    {
+      name: "Defibrillator",
+      dept: "Cardiology",
+      room: 1,
+      mfr: "Philips",
+      model: "HeartStart XL+",
+      serial: "PH-99244",
+      status: "OPERATIONAL",
+      sincePM: 45,
+      installed: 730,
+      price: 12800,
+      warranty: 560,
+    },
+    {
+      name: "Patient monitor",
+      dept: "Cardiology",
+      room: 3,
+      mfr: "Mindray",
+      model: "BeneVision N15",
+      serial: "MR-27519",
+      status: "OPERATIONAL",
+      sincePM: 35,
+      installed: 365,
+      price: 11700,
+      warranty: 640,
+    },
+    {
+      name: "Infusion pump",
+      dept: "Intensive care",
+      room: 4,
+      mfr: "B. Braun",
+      model: "Infusomat Space",
+      serial: "BB-62131",
+      status: "OPERATIONAL",
+      sincePM: 70,
+      installed: 730,
+      price: 2450,
+      warranty: 380,
+    },
+    {
+      name: "Surgical light",
+      dept: "Operating theatres",
+      room: 3,
+      mfr: "Getinge",
+      model: "Maquet PowerLED II",
+      serial: "GT-46200",
+      status: "OPERATIONAL",
+      sincePM: 200,
+      installed: 2555,
+      price: 21400,
+      warranty: -395,
+    },
+    {
+      name: "Centrifuge",
+      dept: "Laboratory",
+      room: 2,
+      mfr: "Siemens Healthineers",
+      model: "Labofuge 400",
+      serial: "SI-63472",
+      status: "OPERATIONAL",
+      sincePM: 120,
+      installed: 1825,
+      price: 4300,
+      warranty: -180,
+    },
+    {
+      name: "Pulse oximeter",
+      dept: "Internal medicine",
+      room: 5,
+      mfr: "Mindray",
+      model: "PM-60A",
+      serial: "MR-90183",
+      status: "OPERATIONAL",
+      sincePM: 60,
+      installed: 1095,
+      price: 480,
+      warranty: 275,
+    },
   ] as const;
 
-  for (let i = 0; i < 184; i++) {
-    const cat = pick(CATEGORIES);
-    const meta = categories.get(cat.name)!;
-    const dept = pick(DEPARTMENTS);
-    const manufacturer = pick(MANUFACTURERS);
-    const engineer = pick(engineers);
-    const roomCode = `${dept.floor}${String(Math.floor(rnd() * 6) + 1).padStart(2, "0")}`;
+  type Spec = (typeof DEVICES)[number];
+  type Fault = Extract<Spec, { fault: unknown }>["fault"];
+  type WorkOrderSpec = Extract<Fault, { wo: unknown }>["wo"];
+  type PartSpec = Extract<WorkOrderSpec, { part: unknown }>["part"];
 
-    // Spread across the cycle: most healthy, a tail already overdue.
-    const position = rnd();
-    let elapsed: number;
-    if (position > 0.93) elapsed = meta.interval + Math.floor(rnd() * 45) + 2;
-    else if (position > 0.82) elapsed = meta.interval - Math.floor(rnd() * 7);
-    else if (position > 0.66) elapsed = meta.interval - 8 - Math.floor(rnd() * 22);
-    else elapsed = Math.floor(rnd() * Math.max(meta.interval - 30, 10));
+  const deptOf = (name: string) => DEPARTMENTS.find((d) => d.name === name)!;
 
-    const lastCompletedAt = addDays(TODAY, -elapsed);
-    const seq = String(i + 1).padStart(6, "0");
+  for (const [i, spec] of DEVICES.entries()) {
+    const meta = categories.get(spec.name)!;
+    const dept = deptOf(spec.dept);
+    const engineer = engineers[i % engineers.length]!;
+    const roomCode = `${dept.floor}${String(spec.room).padStart(2, "0")}`;
+    const lastCompletedAt = addDays(TODAY, -spec.sincePM);
+    const nextDueAt = addDays(lastCompletedAt, meta.interval);
 
     const device = await prisma.equipment.create({
       data: {
-        tag: `BG-EQ-${seq}`,
+        tag: `BG-EQ-${String(i + 1).padStart(6, "0")}`,
         publicToken: generateToken(16), // opaque, not derivable from the tag
         assetNo: `${dept.building.charAt(0)}${1000 + i}`,
-        name: cat.name,
+        name: spec.name,
         categoryId: meta.id,
-        manufacturerId: manufacturers.get(manufacturer)!,
-        model: `${manufacturer.slice(0, 3).toUpperCase()}-${100 + Math.floor(rnd() * 800)}`,
-        serialNo: String(Math.floor(rnd() * 900000) + 100000),
-        departmentId: departments.get(dept.name)!,
-        roomId: rooms.get(`${dept.name}:${roomCode}`) ?? null,
+        manufacturerId: manufacturers.get(spec.mfr)!,
+        model: spec.model,
+        serialNo: spec.serial,
+        departmentId: departments.get(spec.dept)!,
+        roomId: rooms.get(`${spec.dept}:${roomCode}`) ?? null,
         criticality: meta.criticality as never,
-        operationalStatus: pick(statuses) as never,
+        operationalStatus: spec.status as never,
         engineerId: engineer.id,
         intervalDays: meta.interval,
-        intervalSource: rnd() > 0.75 ? "HOSPITAL_POLICY" : "MANUFACTURER",
-        scheduleMode: meta.interval >= 365 && rnd() > 0.6 ? "ANCHORED" : "GRACE",
+        intervalSource: "MANUFACTURER",
+        scheduleMode: "GRACE",
         lastCompletedAt,
-        nextDueAt: addDays(lastCompletedAt, meta.interval),
-        installedAt: addDays(TODAY, -Math.floor(rnd() * 3600) - 200),
-        purchasePrice: Math.floor(rnd() * 400000) + 15000,
-        warrantyEndsAt: addDays(TODAY, Math.floor(rnd() * 900) - 400),
+        nextDueAt,
+        installedAt: addDays(TODAY, -spec.installed),
+        purchasedAt: addDays(TODAY, -spec.installed - 30),
+        purchasePrice: spec.price,
+        warrantyEndsAt: addDays(TODAY, spec.warranty),
       },
     });
 
@@ -285,15 +655,93 @@ async function main() {
         type: "PREVENTIVE",
         completedOn: lastCompletedAt,
         engineerId: engineer.id,
-        workPerformed: "Scheduled service completed. Functional and safety checks passed.",
-        cost: Math.floor(rnd() * 3000) + 250,
-        downtimeHours: Math.floor(rnd() * 5) + 1,
-        nextDueAfter: addDays(lastCompletedAt, meta.interval),
+        workPerformed:
+          "Scheduled service completed. Electrical safety and functional checks passed.",
+        cost: Math.floor(spec.price * 0.03) + 120,
+        downtimeHours: 2,
+        nextDueAfter: nextDueAt,
+      },
+    });
+
+    const fault: Fault | undefined = "fault" in spec ? spec.fault : undefined;
+    if (!fault) continue;
+
+    /**
+     * The corrective chain behind a device that is not on the floor.
+     *
+     * Alert first, then work order, because that is the only way one
+     * legitimately exists: a work order without the alert that raised it
+     * is a row the application itself could not have produced, and it
+     * would read as a bug the first time anyone opened it.
+     */
+    const openedAt = addDays(TODAY, -fault.raisedDaysAgo);
+    const ackHours: number | undefined = "ackHours" in fault ? fault.ackHours : undefined;
+    const assignee = "engineer" in fault ? engineers[fault.engineer]! : null;
+
+    const alert = await prisma.alert.create({
+      data: {
+        equipmentId: device.id,
+        raisedById: nurse.id,
+        description: fault.description,
+        priority: fault.priority as never,
+        status: fault.status as never,
+        openedAt,
+        // The unacknowledged one keeps null timestamps, so its SLA is
+        // still running rather than quietly satisfied by a backdated ack.
+        acknowledgedAt:
+          ackHours === undefined ? null : new Date(openedAt.getTime() + ackHours * 3_600_000),
+        acknowledgedById: ackHours === undefined ? null : alertsHead.id,
+        assignedToId: assignee?.id ?? null,
+        assignedAt: assignee ? new Date(openedAt.getTime() + (ackHours ?? 1) * 3_600_000) : null,
+      },
+    });
+
+    const wo: WorkOrderSpec | undefined = "wo" in fault ? fault.wo : undefined;
+    if (!wo || !assignee) continue;
+
+    const workOrder = await prisma.workOrder.create({
+      data: {
+        alertId: alert.id,
+        equipmentId: device.id,
+        engineerId: assignee.id,
+        status: wo.status as never,
+        priority: fault.priority as never,
+        findings: wo.findings,
+        diagnosis: "diagnosis" in wo ? wo.diagnosis : null,
+      },
+    });
+
+    const part: PartSpec | undefined = "part" in wo ? wo.part : undefined;
+    if (!part) continue;
+
+    // Ordered parts were requested the day before they went out, which
+    // is the ordinary case and keeps the two timestamps consistent.
+    const orderedDaysAgo = "orderedDaysAgo" in part ? part.orderedDaysAgo : undefined;
+    const requestedDaysAgo =
+      "requestedDaysAgo" in part ? part.requestedDaysAgo : orderedDaysAgo! + 1;
+
+    await prisma.workOrderPart.create({
+      data: {
+        workOrderId: workOrder.id,
+        name: part.name,
+        partNumber: part.partNumber,
+        quantity: 1,
+        status: part.status as never,
+        requestedAt: addDays(TODAY, -requestedDaysAgo),
+        orderedAt: orderedDaysAgo === undefined ? null : addDays(TODAY, -orderedDaysAgo),
       },
     });
   }
 
-  console.log("\nSeed complete. 184 devices across 10 departments.\n");
+  const left = (d: Spec) => categories.get(d.name)!.interval - d.sincePM;
+  const overdue = DEVICES.filter((d) => left(d) < 0).length;
+  const dueSoon = DEVICES.filter((d) => left(d) >= 0 && left(d) <= 30).length;
+  const down = DEVICES.filter((d) => d.status !== "OPERATIONAL").length;
+
+  console.log(
+    `\nSeed complete. ${DEVICES.length} devices across 10 departments — ` +
+      `${overdue} overdue, ${dueSoon} due within 30 days, ${down} not in service.\n`
+  );
   console.log("  Administrator:  " + admin.email + "  /  " + adminPassword);
   console.log("  Engineer:       engineer1@bioguard.local  /  " + demoPassword);
   console.log("  Manager:        manager@bioguard.local  /  " + demoPassword);
