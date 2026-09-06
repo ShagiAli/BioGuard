@@ -13,9 +13,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
 import { api, ApiError, type EquipmentDetail } from "../lib/api";
-import { Button, Card, ErrorNote, Spinner } from "../components/ui";
+import { BackLink, Button, Card, ErrorNote, LoadingRows } from "../components/ui";
 
 interface Options {
   categories: { id: string; name: string }[];
@@ -162,20 +161,37 @@ export function EquipmentForm() {
     },
   });
 
-  if (editing && existing.isLoading) return <Spinner label="Loading the device" />;
-  if (editing && existing.isError) return <ErrorNote message="Could not load this device." />;
+  // The heading and the blurb depend on the URL, not on the record, so
+  // they are known before the request goes out. Only the fields wait —
+  // and they have to: an empty form that fills itself in a second later
+  // is one somebody may already have started typing into.
+  if (editing && (existing.isLoading || existing.isError)) {
+    return (
+      <div className="mx-auto max-w-3xl">
+        <BackLink to={`/equipment/${id}`}>Back to the device</BackLink>
+        <h1 className="text-xl font-medium text-slate-900">Edit device</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Corrections to the record. Servicing and status are recorded on the device page.
+        </p>
+        {existing.isError ? (
+          <ErrorNote message="Could not load this device." />
+        ) : (
+          <Card className="mt-5 p-5">
+            <LoadingRows label="Loading the device" rows={6} />
+          </Card>
+        )}
+      </div>
+    );
+  }
 
   const opts = options.data;
   const required = form.name && form.assetNo && form.categoryId && form.departmentId;
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link
-        to={editing ? `/equipment/${id}` : "/equipment"}
-        className="mb-4 flex w-fit items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft size={15} /> {editing ? "Back to the device" : "All equipment"}
-      </Link>
+      <BackLink to={editing ? `/equipment/${id}` : "/equipment"}>
+        {editing ? "Back to the device" : "All equipment"}
+      </BackLink>
 
       <h1 className="text-xl font-medium text-slate-900">
         {editing ? "Edit device" : "Register a device"}

@@ -16,7 +16,7 @@ import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Inbox as InboxIcon, MailOpen, Trash2 } from "lucide-react";
 import { api, formatDateTime } from "../lib/api";
-import { Badge, Card, ErrorNote, Pager, Spinner } from "../components/ui";
+import { Badge, Card, ErrorNote, LoadingRows, Pager, Skeleton } from "../components/ui";
 
 interface SentEmail {
   id: string;
@@ -55,7 +55,10 @@ export function Inbox() {
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["mail"] });
 
-  const markAll = useMutation({ mutationFn: () => api.post("/api/mail/read-all"), onSuccess: refresh });
+  const markAll = useMutation({
+    mutationFn: () => api.post("/api/mail/read-all"),
+    onSuccess: refresh,
+  });
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/mail/${id}`),
     onSuccess: refresh,
@@ -65,8 +68,24 @@ export function Inbox() {
     onSuccess: refresh,
   });
 
-  if (query.isLoading) return <Spinner label="Loading mail" />;
-  if (query.isError) return <ErrorNote message="Could not load the mailbox." />;
+  // The heading is the same every time. The line under it is not — it
+  // depends on whether this account sees every mailbox or only its own —
+  // so it is held open at its own height rather than guessed at.
+  if (query.isLoading || query.isError) {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Mail</h1>
+        <Skeleton className="mt-2 h-4 w-80 max-w-full" />
+        <div className="mt-5">
+          {query.isError ? (
+            <ErrorNote message="Could not load the mailbox." />
+          ) : (
+            <LoadingRows label="Loading mail" rows={6} />
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const data = query.data!;
   const totalPages = Math.ceil(data.total / data.pageSize);

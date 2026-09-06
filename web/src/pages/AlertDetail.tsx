@@ -9,7 +9,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
 import {
   ALERT_STATUS_LABELS,
   alertStatusTone,
@@ -27,7 +26,17 @@ import {
   type AuditEntry,
   type WorkOrder,
 } from "../lib/api";
-import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline } from "../components/ui";
+import {
+  BackLink,
+  Badge,
+  Button,
+  Card,
+  ErrorNote,
+  Field,
+  LoadingRows,
+  Spinner,
+  Timeline,
+} from "../components/ui";
 import { Notes } from "../components/Notes";
 import { AuditDiff } from "./Activity";
 import { useAuth } from "../auth";
@@ -86,23 +95,32 @@ export function AlertDetail() {
     enabled: triagesAlerts(user?.role),
   });
 
-  if (query.isLoading) return <Spinner label="Loading alert" />;
-  if (query.isError) return <ErrorNote message="That alert could not be found." />;
+  // The way out renders before the record does. A record that is slow
+  // or missing is exactly when somebody wants to leave the page.
+  if (query.isLoading || query.isError) {
+    return (
+      <div className="mx-auto max-w-4xl">
+        <BackLink to="/alerts">All alerts</BackLink>
+        {query.isError ? (
+          <ErrorNote message="That alert could not be found." />
+        ) : (
+          <LoadingRows label="Loading alert" />
+        )}
+      </div>
+    );
+  }
 
   const alert = query.data!;
   const canTriage = triagesAlerts(user?.role);
   const isAssignedEngineer = user?.id === alert.assignedTo?.id;
   const canOpenWorkOrder =
-    !alert.workOrder && alert.status === "ASSIGNED" && (isAssignedEngineer || user?.role === "ADMIN");
+    !alert.workOrder &&
+    alert.status === "ASSIGNED" &&
+    (isAssignedEngineer || user?.role === "ADMIN");
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link
-        to="/alerts"
-        className="mb-4 flex w-fit items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft size={15} /> All alerts
-      </Link>
+      <BackLink to="/alerts">All alerts</BackLink>
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -174,9 +192,7 @@ export function AlertDetail() {
               <Field label="Reported on">{formatDate(alert.openedAt)}</Field>
             </div>
 
-            <h3 className="mb-1.5 mt-4 text-xs uppercase tracking-wide text-slate-500">
-              Problem
-            </h3>
+            <h3 className="mb-1.5 mt-4 text-xs uppercase tracking-wide text-slate-500">Problem</h3>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
               {alert.description}
             </p>
@@ -237,9 +253,7 @@ export function AlertDetail() {
             </div>
 
             <div className="space-y-3">
-              <Field label="Assigned to">
-                {alert.assignedTo?.fullName ?? "Nobody yet"}
-              </Field>
+              <Field label="Assigned to">{alert.assignedTo?.fullName ?? "Nobody yet"}</Field>
               {/* The window is hospital policy, counted from when the fault
                   was reported. An alert nobody has picked up is late once
                   the target passes — waiting for an acknowledgement to say
@@ -251,9 +265,7 @@ export function AlertDetail() {
                 {formatDuration(alert.sla.elapsedMinutes)}
               </Field>
               {alert.workOrder && (
-                <Field label="Work order">
-                  {WORK_ORDER_STATUS_LABELS[alert.workOrder.status]}
-                </Field>
+                <Field label="Work order">{WORK_ORDER_STATUS_LABELS[alert.workOrder.status]}</Field>
               )}
               {/* Why the repair is taking time, for the person waiting. */}
               {alert.workOrder && alert.workOrder.parts.length > 0 && (
@@ -312,4 +324,3 @@ export function AlertDetail() {
     </div>
   );
 }
-
