@@ -19,13 +19,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import {
-  api,
-  formatDate,
-  titleCase,
-  type AlertSummary,
-  type SchedulerHealth,
-} from "../lib/api";
+import { api, formatDate, titleCase, type AlertSummary, type SchedulerHealth } from "../lib/api";
 import { useAuth } from "../auth";
 import { Logo } from "./Logo";
 
@@ -149,9 +143,7 @@ export function Layout({ children }: { children: ReactNode }) {
             onClick={() => setDrawerOpen(false)}
             aria-label="Close navigation"
           />
-          <div
-            className="absolute inset-y-0 left-0 flex w-64 flex-col bg-brand-950"
-          >
+          <div className="absolute inset-y-0 left-0 flex w-64 flex-col bg-brand-950">
             <button
               onClick={() => setDrawerOpen(false)}
               className="absolute right-3 top-4 cursor-pointer rounded p-1 text-brand-200/70 transition hover:bg-white/10 hover:text-white"
@@ -203,11 +195,7 @@ export function Layout({ children }: { children: ReactNode }) {
             {!!mail.data?.unread && <Dot count={mail.data.unread} />}
           </NavLink>
 
-          <UserMenu
-            fullName={user?.fullName ?? ""}
-            role={user?.role ?? ""}
-            onSignOut={onSignOut}
-          />
+          <UserMenu fullName={user?.fullName ?? ""} role={user?.role ?? ""} onSignOut={onSignOut} />
         </header>
 
         {oversees && <SchedulerWarning />}
@@ -242,7 +230,9 @@ function SidebarContent({
 }) {
   return (
     <>
-      <div className={`flex items-center gap-2.5 px-5 py-5 ${collapsed ? "justify-center px-0" : ""}`}>
+      <div
+        className={`flex items-center gap-2.5 px-5 py-5 ${collapsed ? "justify-center px-0" : ""}`}
+      >
         <Logo className="h-8 w-8 shrink-0 text-brand-500" />
         {!collapsed && (
           <div className="min-w-0">
@@ -429,7 +419,9 @@ function SimulateBar() {
         <div className="flex items-center gap-2 rounded-md border border-dashed border-brand-400 bg-brand-50 px-3 py-1.5">
           <Clock size={15} className="text-brand-700" />
           <div>
-            <div className="text-xs uppercase tracking-wide text-brand-700">Run scheduler ahead</div>
+            <div className="text-xs uppercase tracking-wide text-brand-700">
+              Run scheduler ahead
+            </div>
             <div className="font-mono text-sm font-medium text-brand-900">Reminder engine</div>
           </div>
         </div>
@@ -453,25 +445,50 @@ function SimulateBar() {
             <RotateCcw size={13} /> Reset
           </button>
         </div>
-
-        {busy && (
-          <span className="flex items-center gap-2 text-xs text-slate-500">
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
-            Running the sweep, one day at a time…
-          </span>
-        )}
       </div>
 
-      {error && (
-        <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-          {error}
-        </div>
-      )}
-      {result && !error && (
-        <div className="mt-2 rounded-md border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
-          {result}
-        </div>
-      )}
+      {/*
+       * One slot for everything this bar has to say, opened on the click
+       * rather than on the response.
+       *
+       * The bar sits in normal flow above <main>, so anything appearing
+       * underneath it pushes the whole page down. Previously the spinner
+       * arrived on click and the result arrived a round-trip later, and
+       * that second insertion was the shift: browsers forgive movement
+       * within 500ms of an input, and a sweep against the database takes
+       * longer than that. Opening the slot in the same paint as the click
+       * puts the movement inside the window that is forgiven, and the
+       * spinner then gives way to the message without the box changing
+       * size.
+       *
+       * min-h-9 is that promise made explicit — one line of text plus its
+       * padding — so the swap cannot resize even if the wording changes.
+       * A message long enough to wrap still grows the box; at this width
+       * none of them do.
+       *
+       * The live region is always mounted, empty and zero-height, because
+       * a screen reader announces changes within a region it was already
+       * watching. Mounting the region and its text together is the case
+       * that goes unread.
+       */}
+      <div role="status" aria-live="polite">
+        {(busy || error || result) && (
+          <div
+            className={`mt-2 flex min-h-9 items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+              error
+                ? "border-rose-200 bg-rose-50 text-rose-800"
+                : busy
+                  ? "border-slate-200 bg-slate-50 text-slate-600"
+                  : "border-brand-200 bg-brand-50 text-brand-900"
+            }`}
+          >
+            {busy && (
+              <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" />
+            )}
+            <span>{busy ? "Running the sweep, one day at a time…" : (error ?? result)}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
