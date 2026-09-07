@@ -197,10 +197,75 @@ Supabase's pooler.
 
 ### Supabase
 
-Use it as a Postgres host. Do not enable Supabase **Auth** or **RLS** —
-BioGuard has its own authentication and permission model, which are
-among the things it exists to demonstrate, and a second identity system
-beside it is a way for the two to disagree about who someone is.
+Use it as a Postgres host. Do not adopt Supabase **Auth**, and do not
+write **RLS policies** — BioGuard has its own authentication and
+permission model, which are among the things it exists to demonstrate,
+and a second identity system beside it is a way for the two to disagree
+about who someone is.
+
+That is not the same as leaving RLS switched off. See the next section:
+RLS with no policies is how you deny the Data API, which is the opposite
+of using it as a permission model.
+
+### Close the Data API before you put data in it
+
+**Do this on every new project, immediately after the migrations.**
+
+Supabase exposes every table in `public` over PostgREST, and grants the
+`anon` and `authenticated` roles full access to anything created there —
+automatically, including tables created by a migration. BioGuard never
+uses that API. It connects to Postgres directly and enforces its own
+sessions and roles. So the grants are a second, unauthenticated door
+onto the same tables, and it opens by itself.
+
+This was live on the London project on 7 September 2026, found during a
+security review. With nothing but the project's publishable anon key,
+`User` and `Session` were readable — password hashes and session token
+hashes — and every table was writable. The application in front of them
+was never the way in.
+
+```sql
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon, authenticated;
+
+-- Without these the next table created is granted all over again.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
+
+REVOKE USAGE ON SCHEMA public FROM anon, authenticated;
+
+-- Second layer: with no policies, RLS denies every row to every role
+-- except the table owner. BioGuard connects as `postgres`, which owns
+-- the tables, and an owner bypasses RLS unless FORCE is set. So this
+-- costs the application nothing and holds even if the grants above are
+-- ever restored by accident.
+DO $$
+DECLARE t record;
+BEGIN
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t.tablename);
+  END LOOP;
+END $$;
+```
+
+Verify it rather than assume it. With the project's anon key:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $ANON_KEY" \
+  "https://<project-ref>.supabase.co/rest/v1/User?select=id&limit=1"
+```
+
+`401` is correct. `200` means the door is still open, whatever the
+dashboard says.
+
+Afterwards the Supabase linter reports every table as *RLS enabled, no
+policy* at INFO level. That is the intended end state here, not an
+outstanding item — the policies it wants are for applications that use
+PostgREST, and this one does not.
 
 **Storage is a different matter**, and this section used to lump it in
 with the other two. Auth and RLS are permission models; storage is a
