@@ -91,6 +91,25 @@ export function createApp() {
     })
   );
 
+  /**
+   * Nothing under /api is cacheable, and nothing under it is public.
+   *
+   * The platform's default for a response that says nothing about
+   * itself is `public, max-age=0, must-revalidate`. The revalidation
+   * makes it behave, but `public` is a claim about who may keep a copy,
+   * and these responses are scoped to whoever is asking — /api/auth/me
+   * literally returns the signed-in person. A shared cache should never
+   * hold one at all, so it is told so directly rather than left to be
+   * inferred from the absence of a header.
+   *
+   * Here rather than in vercel.json because it is a property of the
+   * responses, not of the host serving them.
+   */
+  app.use("/api", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+
   app.use(loadSession);
 
   /**
