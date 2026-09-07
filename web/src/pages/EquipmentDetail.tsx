@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, QrCode, Siren, Wrench, X } from "lucide-react";
+import { ArrowLeft, CalendarClock, QrCode, Siren, Wrench, X } from "lucide-react";
 import {
   api,
   ApiError,
@@ -17,18 +17,7 @@ import {
   type AuditEntry,
   type EquipmentDetail as Detail,
 } from "../lib/api";
-import {
-  BackLink,
-  Badge,
-  Button,
-  Card,
-  ErrorNote,
-  Field,
-  LoadingRows,
-  Spinner,
-  Tabs,
-  pmTone,
-} from "../components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Spinner, pmTone , Tabs } from "../components/ui";
 import { AuditDiff } from "./Activity";
 import { ReportProblem } from "../components/ReportProblem";
 import { useAuth } from "../auth";
@@ -73,20 +62,8 @@ export function EquipmentDetail() {
     queryFn: () => api.get<Detail>(`/api/equipment/${id}`),
   });
 
-  // The way out renders before the record does. A record that is slow
-  // or missing is exactly when somebody wants to leave the page.
-  if (query.isLoading || query.isError) {
-    return (
-      <div className="mx-auto max-w-5xl">
-        <BackLink to="/equipment">All equipment</BackLink>
-        {query.isError ? (
-          <ErrorNote message="That device could not be found." />
-        ) : (
-          <LoadingRows label="Loading device" />
-        )}
-      </div>
-    );
-  }
+  if (query.isLoading) return <Spinner label="Loading device" />;
+  if (query.isError) return <ErrorNote message="That device could not be found." />;
 
   const d = query.data!;
   const remaining = daysUntil(d.nextDueAt);
@@ -95,7 +72,12 @@ export function EquipmentDetail() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <BackLink to="/equipment">All equipment</BackLink>
+      <Link
+        to="/equipment"
+        className="mb-4 flex w-fit items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
+      >
+        <ArrowLeft size={15} /> All equipment
+      </Link>
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

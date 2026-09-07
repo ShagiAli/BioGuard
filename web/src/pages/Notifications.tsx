@@ -13,16 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { AlertTriangle, CalendarClock, Check } from "lucide-react";
 import { api, formatDateTime, type Notification } from "../lib/api";
-import {
-  Badge,
-  Card,
-  Empty,
-  ErrorNote,
-  LoadingRows,
-  Pager,
-  Skeleton,
-  type Tone,
-} from "../components/ui";
+import { Badge, Card, Empty, ErrorNote, Pager, Spinner, type Tone } from "../components/ui";
 
 const LEVEL_TONE: Record<string, Tone> = {
   INFO: "sky",
@@ -75,30 +66,13 @@ export function Notifications() {
   });
 
   /** Any change to what is being asked for restarts at page one. */
-  const reset =
-    <T,>(set: (v: T) => void) =>
-    (value: T) => {
-      set(value);
-      setPage(1);
-    };
+  const reset = <T,>(set: (v: T) => void) => (value: T) => {
+    set(value);
+    setPage(1);
+  };
 
-  // As with Mail: the heading is fixed, the line under it depends on
-  // what this account can see, so it is held open rather than guessed.
-  if (query.isLoading || query.isError) {
-    return (
-      <div className="mx-auto max-w-6xl">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Notifications</h1>
-        <Skeleton className="mt-2 h-4 w-80 max-w-full" />
-        <div className="mt-5">
-          {query.isError ? (
-            <ErrorNote message="Could not load notifications." />
-          ) : (
-            <LoadingRows label="Loading notifications" rows={6} />
-          )}
-        </div>
-      </div>
-    );
-  }
+  if (query.isLoading) return <Spinner label="Loading notifications" />;
+  if (query.isError) return <ErrorNote message="Could not load notifications." />;
 
   const data = query.data!;
   const totalPages = Math.ceil(data.total / data.pageSize);
@@ -150,9 +124,7 @@ export function Notifications() {
             className="cursor-pointer accent-brand-600"
           />
           Unread only
-          {data.unread > 0 && (
-            <span className="font-mono text-xs text-slate-400">{data.unread}</span>
-          )}
+          {data.unread > 0 && <span className="font-mono text-xs text-slate-400">{data.unread}</span>}
         </label>
       </div>
 

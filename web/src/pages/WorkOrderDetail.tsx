@@ -10,9 +10,9 @@
  * an administrator's edit is recorded under its own audit action.
  */
 import { useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Lock } from "lucide-react";
+import { ArrowLeft, Lock } from "lucide-react";
 import {
   api,
   ApiError,
@@ -23,17 +23,7 @@ import {
   type WorkOrder,
   type WorkOrderStatus,
 } from "../lib/api";
-import {
-  BackLink,
-  Badge,
-  Button,
-  Card,
-  ErrorNote,
-  Field,
-  LoadingRows,
-  Tabs,
-  Timeline,
-} from "../components/ui";
+import { Badge, Button, Card, ErrorNote, Field, Spinner, Timeline, Tabs } from "../components/ui";
 import { Notes } from "../components/Notes";
 import { useAuth } from "../auth";
 import { PartsPanel } from "../components/PartsPanel";
@@ -85,20 +75,8 @@ export function WorkOrderDetail() {
     onError: fail,
   });
 
-  // Back to the list rather than to the alert: which alert this repair
-  // belongs to is one of the things not known yet.
-  if (query.isLoading || query.isError) {
-    return (
-      <div className="mx-auto max-w-4xl">
-        <BackLink to="/work-orders">All work orders</BackLink>
-        {query.isError ? (
-          <ErrorNote message="That work order could not be found." />
-        ) : (
-          <LoadingRows label="Loading work order" />
-        )}
-      </div>
-    );
-  }
+  if (query.isLoading) return <Spinner label="Loading work order" />;
+  if (query.isError) return <ErrorNote message="That work order could not be found." />;
 
   const wo = query.data!;
 
@@ -129,7 +107,12 @@ export function WorkOrderDetail() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink to={`/alerts/${wo.alert.id}`}>Back to the alert</BackLink>
+      <Link
+        to={`/alerts/${wo.alert.id}`}
+        className="mb-4 flex w-fit items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
+      >
+        <ArrowLeft size={15} /> Back to the alert
+      </Link>
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

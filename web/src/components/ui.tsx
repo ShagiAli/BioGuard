@@ -1,6 +1,4 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
 import { formatDateTime } from "../lib/api";
 
 export type Tone = "rose" | "amber" | "sky" | "slate" | "emerald" | "teal";
@@ -66,61 +64,6 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
   );
 }
 
-/**
- * A block standing in for something that has not arrived.
- *
- * Sized by the caller, because only the caller knows what is coming. A
- * placeholder that does not match what replaces it moves the page at the
- * moment it replaces it, which is worse than having shown nothing.
- */
-export function Skeleton({ className = "" }: { className?: string }) {
-  return (
-    <span className={`block animate-pulse rounded bg-slate-100 ${className}`} aria-hidden="true" />
-  );
-}
-
-/**
- * A page's content while it is still in flight.
- *
- * This replaces a centred spinner, which said "wait" and nothing else —
- * no heading, no way back, and on a slow connection several seconds of a
- * page that could have been half-drawn from what was already known.
- *
- * The label is not decoration. The bars are hidden from screen readers
- * because a pulsing rectangle means nothing to one, so without it the
- * old spinner's spoken "Loading…" would simply have been deleted.
- */
-export function LoadingRows({ rows = 5, label = "Loading" }: { rows?: number; label?: string }) {
-  return (
-    <div role="status">
-      <span className="sr-only">{label}…</span>
-      <div className="space-y-3" aria-hidden="true">
-        {Array.from({ length: rows }, (_, i) => (
-          <Skeleton key={i} className="h-10 w-full" />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The way back out of a detail page.
- *
- * Shared because four pages had drawn it identically, and because it has
- * to render before the record does: the reason to want it is often that
- * the record is slow or missing.
- */
-export function BackLink({ to, children }: { to: string; children: ReactNode }) {
-  return (
-    <Link
-      to={to}
-      className="mb-4 flex w-fit items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-    >
-      <ArrowLeft size={15} /> {children}
-    </Link>
-  );
-}
-
 export function ErrorNote({ message }: { message: string }) {
   return (
     <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
@@ -154,8 +97,7 @@ export function Button({
   const styles = {
     primary: "bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-300",
     ghost: "border border-slate-200 bg-white text-slate-700 hover:border-slate-300",
-    danger:
-      "border border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-700",
+    danger: "border border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-700",
   }[variant];
 
   return (
@@ -401,9 +343,7 @@ export function Tabs<T extends string>({
           >
             {label}
             {count !== undefined && (
-              <span
-                className={`ml-1.5 tabular-nums ${active ? "text-brand-600" : "text-slate-400"}`}
-              >
+              <span className={`ml-1.5 tabular-nums ${active ? "text-brand-600" : "text-slate-400"}`}>
                 {count}
               </span>
             )}
