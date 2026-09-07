@@ -2,9 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "web/dist",
-  "regions": [
-    "lhr1"
-  ],
+  "regions": ["lhr1"],
   "functions": {
     "api/index.ts": {
       "maxDuration": 60,
@@ -25,26 +23,6 @@
     {
       "path": "/api/cron/sweep",
       "schedule": "0 2 * * *"
-    }
-  ],
-  "headers": [
-    {
-      "source": "/assets/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=31536000, immutable"
-        }
-      ]
-    },
-    {
-      "source": "/(favicon.svg|login-panel.jpg)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=86400"
-        }
-      ]
     }
   ]
 }
