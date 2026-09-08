@@ -39,7 +39,14 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
       nextDueAt: { not: null, lte: addDays(day, 30) },
     },
     include: {
-      engineer: { select: { id: true, email: true, fullName: true } },
+      // An engineer who has left is not a recipient. Without this the
+      // reminder still goes out, addressed to a person who is gone —
+      // which looks exactly like a working schedule and is the quietest
+      // way for a device to fall off the programme.
+      engineer: {
+        where: { isActive: true },
+        select: { id: true, email: true, fullName: true },
+      },
       department: { select: { name: true } },
     },
   });

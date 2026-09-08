@@ -1578,6 +1578,143 @@ describe("managing people", () => {
       .expect(409);
   });
 
+  it("invites a new colleague without ever setting their password", async () => {
+    const admin = await login(seeded.adminEmail);
+    await prisma.sentEmail.deleteMany();
+
+    const res = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "New.Engineer@hospital.test", fullName: "New Engineer", role: "ENGINEER" })
+      .expect(201);
+
+    expect(res.body.email).toBe("new.engineer@hospital.test");
+    expect(res.body).not.toHaveProperty("passwordHash");
+
+    // The invitation is the only way in. Whatever the row holds, nobody
+    // has been told it — so a guessable password must not work.
+    await request(app)
+      .post("/api/auth/login")
+      .send({ email: "new.engineer@hospital.test", password: PASSWORD })
+      .expect(401);
+
+    const invite = await prisma.sentEmail.findFirstOrThrow({
+      where: { to: "new.engineer@hospital.test" },
+    });
+    expect(invite.body).toContain("/reset-password?token=");
+  });
+
+  it("refuses a manager the making of administrators", async () => {
+    const { cookie } = await aManager();
+    await request(app)
+      .post("/api/users")
+      .set("Cookie", cookie)
+      .send({ email: "sneaky@hospital.test", fullName: "Sneaky", role: "ADMIN" })
+      .expect(403);
+  });
+
+  it("will not let somebody leave holding live work", async () => {
+    const admin = await login(seeded.adminEmail);
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+
+    const res = await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", admin)
+      .send({ isActive: false })
+      .expect(409);
+
+    // The refusal has to say how much, or it is only an obstacle.
+    expect(res.body.workload.devices).toBeGreaterThan(0);
+    expect(res.body.error).toContain("Hand over their work first");
+
+    const unchanged = await prisma.user.findFirstOrThrow({ where: { id: engineer.id } });
+    expect(unchanged.isActive).toBe(true);
+  });
+
+  it("hands live work over, and leaves finished work where it happened", async () => {
+    const admin = await login(seeded.adminEmail);
+    const leaver = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    const taker = await prisma.user.findFirstOrThrow({
+      where: { email: seeded.sameDeptEngineerEmail },
+    });
+
+    const signedBefore = await prisma.maintenanceRecord.count({
+      where: { engineerId: leaver.id },
+    });
+    expect(signedBefore).toBeGreaterThan(0);
+
+    const res = await request(app)
+      .post(`/api/users/${leaver.id}/handover`)
+      .set("Cookie", admin)
+      .send({ toId: taker.id })
+      .expect(200);
+
+    expect(res.body.moved.devices).toBeGreaterThan(0);
+
+    // Nothing live is left with the person going.
+    const stillHeld = await request(app)
+      .get(`/api/users/${leaver.id}/workload`)
+      .set("Cookie", admin)
+      .expect(200);
+    expect(stillHeld.body.total).toBe(0);
+
+    // And the services they signed are still theirs. Moving those would
+    // say somebody serviced a device before they were hired.
+    const signedAfter = await prisma.maintenanceRecord.count({ where: { engineerId: leaver.id } });
+    expect(signedAfter).toBe(signedBefore);
+
+    // Now they can go.
+    await request(app)
+      .patch(`/api/users/${leaver.id}`)
+      .set("Cookie", admin)
+      .send({ isActive: false })
+      .expect(200);
+
+    await prisma.user.update({ where: { id: leaver.id }, data: { isActive: true } });
+  });
+
+  it("hands work only to an active engineer", async () => {
+    const admin = await login(seeded.adminEmail);
+    const leaver = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+    const nurse = await prisma.user.findFirstOrThrow({ where: { email: seeded.nurseEmail } });
+
+    // Ward staff cannot act on a work order, so parking one there would
+    // put work somewhere the application will not let anybody move it.
+    await request(app)
+      .post(`/api/users/${leaver.id}/handover`)
+      .set("Cookie", admin)
+      .send({ toId: nurse.id })
+      .expect(400);
+
+    await request(app)
+      .post(`/api/users/${leaver.id}/handover`)
+      .set("Cookie", admin)
+      .send({ toId: leaver.id })
+      .expect(400);
+  });
+
+  it("stops writing to an engineer who has left", async () => {
+    const admin = await login(seeded.adminEmail);
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+
+    await prisma.notificationDispatch.deleteMany();
+    await prisma.sentEmail.deleteMany();
+    await prisma.user.update({ where: { id: engineer.id }, data: { isActive: false } });
+
+    await request(app)
+      .post("/api/admin/simulate")
+      .set("Cookie", admin)
+      .send({ days: 120 })
+      .expect(200);
+
+    // Silence, not a message to somebody who is gone. That failure looks
+    // exactly like a working schedule, which is what makes it dangerous.
+    const wrote = await prisma.sentEmail.count({ where: { to: seeded.engineerEmail } });
+    expect(wrote).toBe(0);
+
+    await prisma.user.update({ where: { id: engineer.id }, data: { isActive: true } });
+  });
+
   it("keeps the last administrator", async () => {
     const admin = await login(seeded.adminEmail);
     const other = await prisma.user.findFirstOrThrow({ where: { email: seeded.adminEmail } });
