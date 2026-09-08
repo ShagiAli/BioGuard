@@ -406,16 +406,24 @@ function SimulateBar() {
         </div>
 
         <div className="flex items-center gap-1">
-          {[7, 14, 30, 90].map((n) => (
-            <button
-              key={n}
-              disabled={busy}
-              onClick={() => simulate.mutate(n)}
-              className="cursor-pointer rounded-md border border-slate-200 px-2.5 py-1.5 font-mono text-xs text-slate-600 transition hover:border-brand-400 hover:bg-slate-100 hover:text-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              +{n}d
-            </button>
-          ))}
+          {/*
+           * One week, and only one week.
+           *
+           * The longer jumps existed to make a month of the schedule
+           * appear at once, which was harmless while reminders were
+           * rows in a table. They are real email now: +90d swept
+           * ninety days in a single press and produced dozens of
+           * messages to a real inbox, which is how a sending account
+           * earns a rate limit. A week is enough to watch the engine
+           * work, and pressing it again is not hard.
+           */}
+          <button
+            disabled={busy}
+            onClick={() => simulate.mutate(7)}
+            className="cursor-pointer rounded-md border border-slate-200 px-2.5 py-1.5 font-mono text-xs text-slate-600 transition hover:border-brand-400 hover:bg-slate-100 hover:text-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            +7d
+          </button>
           <button
             disabled={busy}
             onClick={() => reset.mutate()}
