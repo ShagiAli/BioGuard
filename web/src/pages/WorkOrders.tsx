@@ -62,8 +62,7 @@ export function WorkOrders() {
 
   const query = useQuery({
     queryKey: ["work-orders", params.toString()],
-    queryFn: () =>
-      api.get<Feed>(`/api/work-orders?${listQuery.toString()}`),
+    queryFn: () => api.get<Feed>(`/api/work-orders?${listQuery.toString()}`),
     placeholderData: keepPreviousData,
   });
 
@@ -143,11 +142,11 @@ export function WorkOrders() {
       </div>
 
       <Card className="mt-3">
-        {query.isLoading ? (
-          <Spinner label="Loading work orders" />
-        ) : query.isError ? (
+        {query.isError ? (
           <ErrorNote message="Could not load work orders." />
-        ) : query.data!.rows.length === 0 ? (
+        ) : !query.data ? (
+          <Spinner label="Loading work orders" />
+        ) : query.data.rows.length === 0 ? (
           <Empty
             title={archived ? "Nothing archived yet." : "No work under way."}
             hint={
@@ -172,7 +171,7 @@ export function WorkOrders() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {query.data!.rows.map((wo) => {
+                {query.data.rows.map((wo) => {
                   const outstanding = wo.parts.filter((p) => isPartOutstanding(p.status)).length;
                   return (
                     <tr
@@ -261,9 +260,7 @@ function Tab({
     <button
       onClick={onClick}
       className={`cursor-pointer rounded-md px-3 py-1.5 text-sm transition ${
-        active
-          ? "bg-teal-50 font-medium text-teal-900"
-          : "text-slate-600 hover:bg-slate-100"
+        active ? "bg-teal-50 font-medium text-teal-900" : "text-slate-600 hover:bg-slate-100"
       }`}
     >
       {children}

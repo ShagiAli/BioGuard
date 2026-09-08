@@ -131,11 +131,11 @@ export function Activity() {
       </div>
 
       <Card className="mt-4">
-        {query.isLoading ? (
-          <Spinner label="Loading activity" />
-        ) : query.isError ? (
+        {query.isError ? (
           <ErrorNote message="Could not load the activity feed." />
-        ) : query.data!.rows.length === 0 ? (
+        ) : !query.data ? (
+          <Spinner label="Loading activity" />
+        ) : query.data.rows.length === 0 ? (
           <Empty
             title="Nothing recorded yet."
             hint="Changing a device's status or filing maintenance will appear here."
@@ -153,13 +153,15 @@ export function Activity() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {query.data!.rows.map((entry) => (
+                {query.data.rows.map((entry) => (
                   <tr key={entry.id} className="align-top">
                     <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-500">
                       {formatDateTime(entry.createdAt)}
                     </td>
                     <td className="px-4 py-2.5">
-                      <Badge tone={entry.action === "maintenance.recorded_rebased" ? "amber" : "slate"}>
+                      <Badge
+                        tone={entry.action === "maintenance.recorded_rebased" ? "amber" : "slate"}
+                      >
                         {AUDIT_ACTION_LABELS[entry.action] ?? entry.action}
                       </Badge>
                     </td>
@@ -207,7 +209,6 @@ export function Activity() {
     </div>
   );
 }
-
 
 /** The fields that actually moved, rendered old → new. */
 export function AuditDiff({ entry }: { entry: AuditEntry }) {

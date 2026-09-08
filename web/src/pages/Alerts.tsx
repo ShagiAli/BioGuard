@@ -280,11 +280,11 @@ export function Alerts() {
       </div>
 
       <Card className="mt-3">
-        {query.isLoading ? (
-          <Spinner label="Loading alerts" />
-        ) : query.isError ? (
+        {query.isError ? (
           <ErrorNote message="Could not load alerts." />
-        ) : query.data!.rows.length === 0 ? (
+        ) : !query.data ? (
+          <Spinner label="Loading alerts" />
+        ) : query.data.rows.length === 0 ? (
           <Empty
             title="No alerts here."
             hint="Faults reported from the wards appear in this list."
@@ -304,7 +304,7 @@ export function Alerts() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {query.data!.rows.map((alert) => (
+                {query.data.rows.map((alert) => (
                   <tr
                     key={alert.id}
                     onClick={() => navigate(`/alerts/${alert.id}`)}
@@ -326,9 +326,7 @@ export function Alerts() {
                     <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{alert.number}</td>
                     <td className="max-w-xs px-4 py-2.5">
                       <div className="truncate text-slate-800">{alert.description}</div>
-                      <div className="text-xs text-slate-400 lg:hidden">
-                        {alert.equipment.name}
-                      </div>
+                      <div className="text-xs text-slate-400 lg:hidden">{alert.equipment.name}</div>
                     </td>
                     <td className="hidden px-4 py-2.5 lg:table-cell">
                       <div className="text-slate-700">{alert.equipment.name}</div>

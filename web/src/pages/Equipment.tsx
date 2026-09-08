@@ -49,13 +49,26 @@ function labelFor(key: string, value: string) {
 }
 
 /**
- * Parameters that steer the table rather than narrow it.
+ * The only keys this page owns.
  *
- * They live in the URL alongside the filters so a view can be shared
- * whole, but they are not things anyone would think of as "filtered by",
- * and offering to remove them as chips would be nonsense.
+ * Split in two because the paging ones steer the table rather than
+ * narrow it: they belong in the URL so a view can be shared whole, but
+ * nobody thinks of them as something they filtered by, and offering to
+ * remove them as chips would be nonsense.
+ *
+ * It used to hand the URL to the API verbatim, so anything else riding
+ * along went with it — a utm_source on a shared link, an analytics
+ * redirect, a stale bookmark. The API rejects keys it does not know, by
+ * design and under test, so the list came back 400 and the page went
+ * blank. The same copy also drew "utm_source: newsletter" in the filter
+ * bar as though it were a filter somebody had chosen.
+ *
+ * Naming them here fixes both, and means a saved view carrying a key
+ * that no longer exists is quietly ignored rather than fatal.
  */
-const NOT_A_FILTER = new Set(["page", "pageSize", "sort", "dir", "format"]);
+const FILTER_KEYS = ["q", "pm", "criticality", "operationalStatus"] as const;
+const PAGING_KEYS = ["page", "pageSize", "sort", "dir"] as const;
+const LIST_KEYS: readonly string[] = [...FILTER_KEYS, ...PAGING_KEYS];
 
 export function Equipment() {
   /**
@@ -170,7 +183,11 @@ export function Equipment() {
    * export link below asks for exactly what the table is showing.
    */
   const listParams = (() => {
-    const next = new URLSearchParams(params);
+    const next = new URLSearchParams();
+    for (const key of LIST_KEYS) {
+      const value = params.get(key);
+      if (value) next.set(key, value);
+    }
     if (!next.get("pageSize")) next.set("pageSize", String(pageSize));
     return next;
   })();
@@ -206,7 +223,9 @@ export function Equipment() {
     setParams(params2);
   };
 
-  const active = [...params.entries()].filter(([k]) => !NOT_A_FILTER.has(k));
+  const active = [...params.entries()].filter(([k]) =>
+    (FILTER_KEYS as readonly string[]).includes(k)
+  );
   const totalPages = query.data ? Math.ceil(query.data.total / query.data.pageSize) : 1;
 
   return (
@@ -315,12 +334,15 @@ export function Equipment() {
       )}
 
       <Card className="mt-4 overflow-hidden">
-        {query.isLoading ? (
-          <Spinner label="Loading equipment" />
-        ) : query.isError ? (
+        {query.isError ? (
           <ErrorNote message="Could not load the equipment list." />
-        ) : query.data!.rows.length === 0 ? (
-          <Empty title="No devices match these filters." hint="Clear a filter to widen the search." />
+        ) : !query.data ? (
+          <Spinner label="Loading equipment" />
+        ) : query.data.rows.length === 0 ? (
+          <Empty
+            title="No devices match these filters."
+            hint="Clear a filter to widen the search."
+          />
         ) : (
           <table className="w-full text-sm">
             <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -353,7 +375,7 @@ export function Equipment() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {query.data!.rows.map((d) => (
+              {query.data.rows.map((d) => (
                 <tr
                   key={d.id}
                   onClick={() => navigate(`/equipment/${d.id}`)}
