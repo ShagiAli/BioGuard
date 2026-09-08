@@ -11,6 +11,7 @@ import {
   Clock,
   History,
   Siren,
+  Users as UsersIcon,
   Wrench,
   LayoutDashboard,
   LogOut,
@@ -96,7 +97,12 @@ export function Layout({ children }: { children: ReactNode }) {
     { to: "/alerts", label: "Alerts", icon: Siren, end: false, count: alerts.data?.open },
     { to: "/work-orders", label: "Work orders", icon: Wrench, end: false },
     { to: "/notifications", label: "Notifications", icon: Bell, end: false, count: data?.unread },
-    ...(oversees ? [{ to: "/activity", label: "Activity", icon: History, end: false }] : []),
+    ...(oversees
+      ? [
+          { to: "/activity", label: "Activity", icon: History, end: false },
+          { to: "/people", label: "People", icon: UsersIcon, end: false },
+        ]
+      : []),
   ];
 
   const onSignOut = async () => {

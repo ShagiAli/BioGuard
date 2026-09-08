@@ -1462,3 +1462,138 @@ describe("hardening", () => {
     expect(stored.acknowledgedById).not.toBeNull();
   });
 });
+
+describe("managing people", () => {
+  /** A manager, created here because the shared fixture has none. */
+  async function aManager() {
+    const manager = await prisma.user.upsert({
+      where: { email: "people.manager@test.local" },
+      update: { isActive: true, role: "MANAGER" },
+      create: {
+        email: "people.manager@test.local",
+        passwordHash: await hashPassword(PASSWORD),
+        fullName: "People Manager",
+        role: "MANAGER",
+      },
+    });
+    return { manager, cookie: await login(manager.email) };
+  }
+
+  it("shows the roster to oversight, and to nobody else", async () => {
+    const admin = await login(seeded.adminEmail);
+    const res = await request(app).get("/api/users").set("Cookie", admin).expect(200);
+    expect(res.body.rows.length).toBeGreaterThan(0);
+
+    const engineer = await login(seeded.engineerEmail);
+    await request(app).get("/api/users").set("Cookie", engineer).expect(403);
+    const nurse = await login(seeded.nurseEmail);
+    await request(app).get("/api/users").set("Cookie", nurse).expect(403);
+  });
+
+  it("never hands back a password hash", async () => {
+    const admin = await login(seeded.adminEmail);
+    const res = await request(app).get("/api/users").set("Cookie", admin).expect(200);
+    for (const row of res.body.rows) {
+      expect(row).not.toHaveProperty("passwordHash");
+    }
+    expect(JSON.stringify(res.body)).not.toContain("$argon2");
+  });
+
+  it("lets a manager correct an address, which is the point of the screen", async () => {
+    const { cookie } = await aManager();
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+
+    const res = await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", cookie)
+      .send({ email: "James.Carter@Hospital.NHS.uk" })
+      .expect(200);
+
+    // Lowercased on the way in, or the login lookup would never match it.
+    expect(res.body.email).toBe("james.carter@hospital.nhs.uk");
+
+    // The person keeps their account: same row, same password.
+    await request(app)
+      .post("/api/auth/login")
+      .send({ email: "james.carter@hospital.nhs.uk", password: PASSWORD })
+      .expect(200);
+
+    await prisma.user.update({ where: { id: engineer.id }, data: { email: seeded.engineerEmail } });
+  });
+
+  it("refuses a manager the administrators", async () => {
+    const { cookie } = await aManager();
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: seeded.adminEmail } });
+
+    // Two steps to a takeover otherwise: point the address at yourself,
+    // then ask for a password reset.
+    await request(app)
+      .patch(`/api/users/${admin.id}`)
+      .set("Cookie", cookie)
+      .send({ email: "people.manager@test.local" })
+      .expect(403);
+
+    const unchanged = await prisma.user.findFirstOrThrow({ where: { id: admin.id } });
+    expect(unchanged.email).toBe(seeded.adminEmail);
+  });
+
+  it("refuses a manager the power to make one", async () => {
+    const { cookie } = await aManager();
+    const nurse = await prisma.user.findFirstOrThrow({ where: { email: seeded.nurseEmail } });
+
+    await request(app)
+      .patch(`/api/users/${nurse.id}`)
+      .set("Cookie", cookie)
+      .send({ role: "ADMIN" })
+      .expect(403);
+
+    const unchanged = await prisma.user.findFirstOrThrow({ where: { id: nurse.id } });
+    expect(unchanged.role).toBe("STAFF");
+  });
+
+  it("will not let somebody lock themselves out", async () => {
+    const { manager, cookie } = await aManager();
+
+    await request(app)
+      .patch(`/api/users/${manager.id}`)
+      .set("Cookie", cookie)
+      .send({ isActive: false })
+      .expect(409);
+
+    await request(app)
+      .patch(`/api/users/${manager.id}`)
+      .set("Cookie", cookie)
+      .send({ role: "STAFF" })
+      .expect(409);
+  });
+
+  it("refuses an address another account already uses", async () => {
+    const admin = await login(seeded.adminEmail);
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+
+    await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", admin)
+      .send({ email: seeded.nurseEmail })
+      .expect(409);
+  });
+
+  it("keeps the last administrator", async () => {
+    const admin = await login(seeded.adminEmail);
+    const other = await prisma.user.findFirstOrThrow({ where: { email: seeded.adminEmail } });
+
+    // Demoting yourself is refused before the count is even consulted,
+    // so make a second administrator and take the first one's rank away
+    // from there — the count is what must stop it.
+    await prisma.user.updateMany({
+      where: { role: "ADMIN", id: { not: other.id } },
+      data: { role: "STAFF" },
+    });
+
+    await request(app)
+      .patch(`/api/users/${other.id}`)
+      .set("Cookie", admin)
+      .send({ isActive: false })
+      .expect(409);
+  });
+});
