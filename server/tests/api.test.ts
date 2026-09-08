@@ -392,75 +392,6 @@ describe("recording maintenance", () => {
   });
 });
 
-describe("mailbox", () => {
-  /**
-   * Mail is addressed by email string rather than by a user relation,
-   * so scoping here is a different code path from the equipment scope
-   * and needs its own coverage.
-   */
-  async function seedMail() {
-    await prisma.sentEmail.deleteMany();
-    await prisma.sentEmail.createMany({
-      data: [
-        { to: seeded.engineerEmail, subject: "Read, mine", body: "x", readAt: new Date() },
-        { to: seeded.engineerEmail, subject: "Unread, mine", body: "x" },
-        { to: seeded.otherEngineerEmail, subject: "Read, theirs", body: "x", readAt: new Date() },
-      ],
-    });
-  }
-
-  it("shows an engineer only their own mail", async () => {
-    await seedMail();
-    const cookie = await login(seeded.engineerEmail);
-    const res = await request(app).get("/api/mail").set("Cookie", cookie).expect(200);
-
-    expect(res.body.rows).toHaveLength(2);
-    expect(res.body.scope).toBe("own");
-    for (const row of res.body.rows) {
-      expect(row.to).toBe(seeded.engineerEmail);
-    }
-  });
-
-  it("shows an administrator the whole outbox", async () => {
-    await seedMail();
-    const cookie = await login(seeded.adminEmail);
-    const res = await request(app).get("/api/mail").set("Cookie", cookie).expect(200);
-
-    expect(res.body.rows).toHaveLength(3);
-    expect(res.body.scope).toBe("all");
-  });
-
-  it("refuses to delete a message belonging to someone else", async () => {
-    await seedMail();
-    const theirs = await prisma.sentEmail.findFirstOrThrow({
-      where: { to: seeded.otherEngineerEmail },
-    });
-
-    const cookie = await login(seeded.engineerEmail);
-    // 404 rather than 403: confirming the message exists is a disclosure.
-    await request(app).delete(`/api/mail/${theirs.id}`).set("Cookie", cookie).expect(404);
-
-    expect(await prisma.sentEmail.count({ where: { id: theirs.id } })).toBe(1);
-  });
-
-  it("deletes only the caller's own read mail in bulk", async () => {
-    await seedMail();
-    const cookie = await login(seeded.engineerEmail);
-
-    const res = await request(app).delete("/api/mail/read").set("Cookie", cookie).expect(200);
-    expect(res.body.deleted).toBe(1);
-
-    // The unread one survives — losing an unseen reminder is the one
-    // failure a mailbox must not have.
-    const mine = await prisma.sentEmail.findMany({ where: { to: seeded.engineerEmail } });
-    expect(mine).toHaveLength(1);
-    expect(mine[0]!.readAt).toBeNull();
-
-    // And another engineer's mail is untouched.
-    expect(await prisma.sentEmail.count({ where: { to: seeded.otherEngineerEmail } })).toBe(1);
-  });
-});
-
 describe("scheduler idempotency", () => {
   it("does not send the same reminder twice", async () => {
     const cookie = await login(seeded.adminEmail);
@@ -621,26 +552,35 @@ describe("list contracts", () => {
     expect(res.body.graceWindow).toBe(18);
   });
 
-  it("pages notifications and mail, counting unread over the whole mailbox", async () => {
-    await prisma.sentEmail.deleteMany();
-    await prisma.sentEmail.createMany({
+  it("pages notifications, counting unread over the whole feed", async () => {
+    const engineer = await prisma.user.findUniqueOrThrow({
+      where: { email: seeded.engineerEmail },
+      select: { id: true },
+    });
+
+    await prisma.notification.deleteMany();
+    await prisma.notification.createMany({
       data: Array.from({ length: 30 }, (_, i) => ({
-        to: seeded.engineerEmail,
-        subject: `Message ${i}`,
+        recipientId: engineer.id,
+        level: "INFO" as const,
+        title: `Message ${i}`,
         body: "x",
       })),
     });
 
     const cookie = await login(seeded.engineerEmail);
 
-    const first = await request(app).get("/api/mail?pageSize=10").set("Cookie", cookie).expect(200);
+    const first = await request(app)
+      .get("/api/notifications?pageSize=10")
+      .set("Cookie", cookie)
+      .expect(200);
     expect(first.body.rows).toHaveLength(10);
     expect(first.body.total).toBe(30);
-    // The badge must reflect the mailbox, not the page.
+    // The badge must reflect the feed, not the page.
     expect(first.body.unread).toBe(30);
 
     const third = await request(app)
-      .get("/api/mail?pageSize=10&page=3")
+      .get("/api/notifications?pageSize=10&page=3")
       .set("Cookie", cookie)
       .expect(200);
     expect(third.body.rows).toHaveLength(10);
@@ -649,8 +589,8 @@ describe("list contracts", () => {
 
   it("rejects an unknown paging key", async () => {
     const cookie = await login(seeded.engineerEmail);
-    await request(app).get("/api/mail?nonsense=1").set("Cookie", cookie).expect(400);
     await request(app).get("/api/notifications?nonsense=1").set("Cookie", cookie).expect(400);
+    await request(app).get("/api/equipment?nonsense=1").set("Cookie", cookie).expect(400);
   });
 });
 
@@ -1168,6 +1108,36 @@ describe("parts", () => {
     // She reported it; she can see why it is taking time.
     expect(res.body.workOrder.parts[0].status).toBe("ORDERED");
     expect(res.body.workOrder.parts[0].orderedAt).not.toBeNull();
+  });
+
+  it("tells the people who can order it, and not the engineer who asked", async () => {
+    const { workOrderId, cookie } = await openWorkOrder();
+    await prisma.notification.deleteMany();
+    await prisma.sentEmail.deleteMany();
+
+    await addPart(workOrderId, cookie, "Turbine assembly");
+
+    const told = await prisma.notification.findMany({
+      where: { title: { contains: "Turbine assembly" } },
+      include: { recipient: { select: { email: true, role: true } } },
+    });
+
+    // An engineer cannot raise a purchase order, so the message goes to
+    // the roles that can — and to the desk rather than a named person,
+    // who may be on leave the day the device goes down.
+    const roles = [...new Set(told.map((t) => t.recipient.role))].sort();
+    expect(roles).toEqual(["ADMIN", "MANAGER"]);
+    expect(told.map((t) => t.recipient.email)).not.toContain(seeded.engineerEmail);
+
+    // And it left the building, or was recorded as having tried to.
+    const outbox = await prisma.sentEmail.findMany({
+      where: { subject: { contains: "Turbine assembly" } },
+      select: { to: true, body: true },
+    });
+    expect(outbox.length).toBe(told.length);
+    // Enough to act on without opening anything.
+    expect(outbox[0]!.body).toContain("Turbine assembly");
+    expect(outbox[0]!.body).toContain("out of service");
   });
 
   it("keeps parts out of another engineer's hands", async () => {

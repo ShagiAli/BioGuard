@@ -14,7 +14,6 @@ import {
   Wrench,
   LayoutDashboard,
   LogOut,
-  Mail,
   Menu,
   RotateCcw,
   X,
@@ -71,18 +70,12 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Only the unread counts are needed here, and those are counted over
-  // the whole mailbox rather than the page — so ask for the smallest
-  // page the API allows instead of pulling rows the sidebar never draws.
+  // Only the unread count is needed here, and it is counted over every
+  // notification rather than the page — so ask for the smallest page the
+  // API allows instead of pulling rows the sidebar never draws.
   const { data } = useQuery({
     queryKey: ["notifications", "badge"],
     queryFn: () => api.get<{ unread: number }>("/api/notifications?pageSize=1"),
-    refetchInterval: 60_000,
-  });
-
-  const mail = useQuery({
-    queryKey: ["mail", "badge"],
-    queryFn: () => api.get<{ unread: number }>("/api/mail?pageSize=1"),
     refetchInterval: 60_000,
   });
 
@@ -103,7 +96,6 @@ export function Layout({ children }: { children: ReactNode }) {
     { to: "/alerts", label: "Alerts", icon: Siren, end: false, count: alerts.data?.open },
     { to: "/work-orders", label: "Work orders", icon: Wrench, end: false },
     { to: "/notifications", label: "Notifications", icon: Bell, end: false, count: data?.unread },
-    { to: "/mail", label: "Mail", icon: Mail, end: false, count: mail.data?.unread },
     ...(oversees ? [{ to: "/activity", label: "Activity", icon: History, end: false }] : []),
   ];
 
@@ -184,15 +176,6 @@ export function Layout({ children }: { children: ReactNode }) {
           >
             <Bell size={18} />
             {!!data?.unread && <Dot count={data.unread} />}
-          </NavLink>
-
-          <NavLink
-            to="/mail"
-            className="relative cursor-pointer rounded-md p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label={`Mail${mail.data?.unread ? `, ${mail.data.unread} unread` : ""}`}
-          >
-            <Mail size={18} />
-            {!!mail.data?.unread && <Dot count={mail.data.unread} />}
           </NavLink>
 
           <UserMenu fullName={user?.fullName ?? ""} role={user?.role ?? ""} onSignOut={onSignOut} />
@@ -372,10 +355,6 @@ function SimulateBar() {
     qc.invalidateQueries({ queryKey: ["summary"] });
     qc.invalidateQueries({ queryKey: ["equipment"] });
     qc.invalidateQueries({ queryKey: ["attention"] });
-    // The sweep writes mail as well as notifications. Without this the
-    // Mail page only catches up on its 60-second poll, which reads as
-    // the app being slow.
-    qc.invalidateQueries({ queryKey: ["mail"] });
   };
 
   const simulate = useMutation({
@@ -387,7 +366,7 @@ function SimulateBar() {
           ? `No new reminders were due through ${data.through}. Every rung in that range has already been sent — press Reset to replay it.`
           : `${data.notificationsSent} reminder${
               data.notificationsSent === 1 ? "" : "s"
-            } sent, through ${data.through}. Read them under Notifications, or Mail to see the messages as delivered.`
+            } sent, through ${data.through}. Read them under Notifications; the emails have gone to the people responsible.`
       );
       refresh();
     },

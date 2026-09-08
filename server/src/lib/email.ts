@@ -1,13 +1,25 @@
 /**
- * Email behind an interface, so the transport is configuration rather
- * than a code change.
+ * Email leaves the building. It is not a second inbox inside the
+ * application.
  *
- *  smtp — a real server. Mailpit locally, a provider in production.
- *  db   — stores the message so recipients can read it inside the app.
- *         Used for the public demo: the seeded engineers have
- *         @bioguard.local addresses that do not exist, and sending to
- *         them would produce nothing but bounces.
- *  log  — writes a line and discards the message.
+ * Notifications are what somebody sees when they open BioGuard. Mail is
+ * what reaches them when they have not opened it. Those are different
+ * jobs, and for a while they were not: the `db` driver wrote messages to
+ * a table that the application then rendered as a mailbox, so both ended
+ * up as the same list on two pages.
+ *
+ * Now every message is recorded and, when a mail server is configured,
+ * also delivered:
+ *
+ *  - The SentEmail row is the outbox — proof of what was sent, to whom
+ *    and when. Nothing renders it; it is a record, not a feature.
+ *  - MAIL_DRIVER=smtp delivers as well. Anything else records and stops,
+ *    which is what the public demo wants: its engineers have
+ *    @bioguard.local addresses that do not exist, and sending to them
+ *    would produce nothing but bounces.
+ *
+ * So turning real email on is credentials plus one setting, and turning
+ * it off never loses the history of what would have gone.
  */
 import nodemailer from "nodemailer";
 import { env } from "../env.js";
@@ -22,49 +34,57 @@ export interface Mail {
 
 const transport =
   env.MAIL_DRIVER === "smtp"
-    ? nodemailer.createTransport({ host: env.SMTP_HOST, port: env.SMTP_PORT, secure: false })
+    ? nodemailer.createTransport({
+        host: env.SMTP_HOST,
+        port: env.SMTP_PORT,
+        secure: env.SMTP_SECURE,
+        // Omitted entirely rather than passed as undefined: nodemailer
+        // treats the presence of `auth` as a request to authenticate,
+        // and Mailpit rejects the attempt.
+        ...(env.SMTP_USER && env.SMTP_PASS
+          ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASS } }
+          : {}),
+      })
     : null;
 
 /**
- * Batched delivery. The db driver writes every message in one insert,
- * which matters for the sweep: one round trip instead of one per
- * recipient, and the difference is minutes when the database is on
+ * The outbox write, batched. One insert for the whole sweep rather than
+ * one per recipient — the difference is minutes when the database is on
  * another continent.
  */
-export async function sendMailMany(mails: Mail[]): Promise<void> {
-  if (mails.length === 0) return;
-
+async function record(mails: Mail[]): Promise<void> {
   try {
-    if (env.MAIL_DRIVER === "db") {
-      await prisma.sentEmail.createMany({
-        data: mails.map((m) => ({ to: m.to, subject: m.subject, body: m.text })),
-      });
-      return;
-    }
-    // SMTP has no batch equivalent; send them one at a time.
-    for (const mail of mails) await sendMail(mail);
+    await prisma.sentEmail.createMany({
+      data: mails.map((m) => ({ to: m.to, subject: m.subject, body: m.text })),
+    });
   } catch (err) {
-    logger.error({ err, count: mails.length }, "batch mail delivery failed");
+    // The record failing must not stop the message going out. Losing the
+    // audit line is bad; losing the email is worse.
+    logger.error({ err, count: mails.length }, "outbox write failed");
   }
 }
 
-export async function sendMail(mail: Mail): Promise<void> {
+async function deliver(mail: Mail): Promise<void> {
   try {
-    if (env.MAIL_DRIVER === "db") {
-      await prisma.sentEmail.create({
-        data: { to: mail.to, subject: mail.subject, body: mail.text },
-      });
-      return;
-    }
-
     if (transport) {
       await transport.sendMail({ from: env.MAIL_FROM, ...mail });
       return;
     }
-
-    logger.info({ to: mail.to, subject: mail.subject }, "mail (log driver)");
+    logger.info({ to: mail.to, subject: mail.subject }, "mail recorded, not sent (no transport)");
   } catch (err) {
     // A failed message must never take down the sweep that produced it.
     logger.error({ err, to: mail.to }, "mail delivery failed");
   }
+}
+
+export async function sendMailMany(mails: Mail[]): Promise<void> {
+  if (mails.length === 0) return;
+  await record(mails);
+  // SMTP has no batch equivalent; send them one at a time.
+  for (const mail of mails) await deliver(mail);
+}
+
+export async function sendMail(mail: Mail): Promise<void> {
+  await record([mail]);
+  await deliver(mail);
 }

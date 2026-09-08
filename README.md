@@ -97,11 +97,33 @@ PostgreSQL           UUIDv7 primary keys, pg-boss queue in its own schema
 Mailpit              catches outgoing mail in development
 ```
 
-Mail has three transports, chosen by `MAIL_DRIVER`: `smtp` for a real
-server or Mailpit, `db` to store messages so recipients read them inside
-the app, and `log` to discard them. The public demo runs on `db` — every
-seeded engineer has an `@bioguard.local` address that does not exist, so
+**Notifications and mail are different things, deliberately.** A
+notification is what somebody sees when they open BioGuard. Mail is what
+reaches them when they do not. For a while they were the same list on two
+pages, because mail was being written to a table the application then
+rendered as a mailbox — so the thing that was supposed to reach a person
+who was not looking only reached a person who was.
+
+Now every message is recorded in `SentEmail` as an outbox — proof of what
+was sent, to whom and when, with nothing rendering it — and delivered as
+well when `MAIL_DRIVER=smtp` and a server is configured. Anything else
+records and stops. The public demo records and stops, because every
+seeded engineer has an `@bioguard.local` address that does not exist and
 sending would produce nothing but bounces.
+
+Who gets what follows from who can act on it:
+
+| Message | Goes to |
+| --- | --- |
+| A fault is reported | Head of alerts, administrators — plus managers when it is an emergency |
+| A fault is assigned | The engineer, with its priority and how long they have to acknowledge |
+| Preventive maintenance falls due | The device's engineer, with days remaining and the device's criticality |
+| A repair needs a part | Administrators and managers, who are the ones who can order it |
+| A fault is acknowledged or resolved | Whoever reported it |
+
+Managers are copied on emergencies rather than on everything: a person
+copied on every routine fault learns to filter the sender, and then
+misses the one that mattered.
 
 ### Decisions worth explaining
 
@@ -275,12 +297,7 @@ second run sends nothing, which is the idempotency constraint working.
 
 Each sweep is four queries per day regardless of fleet size: read the
 candidates, read what has already been sent, one transaction for the
-dispatches and notifications, one batched insert for the mail.
-
-![Delivered reminders](docs/mail.png)
-
-*Messages as delivered. Engineers see mail addressed to them;
-administrators and managers see the whole outbox with recipients.*
+dispatches and notifications, one batched insert for the outbox.
 
 ## Deploying
 

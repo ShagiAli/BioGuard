@@ -84,11 +84,23 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
   }
 
   const messages = fresh.map(({ device, threshold, dueDate }) => {
-    const title = `${device.name} (${device.assetNo}) — maintenance ${threshold.label}`;
+    // threshold.at is days remaining, negative once the date has passed.
+    const left =
+      threshold.at >= 0
+        ? `${threshold.at} day${threshold.at === 1 ? "" : "s"} remaining`
+        : `${-threshold.at} day${threshold.at === -1 ? "" : "s"} overdue`;
+
+    const urgent = device.criticality === "CRITICAL" && threshold.at <= 0;
+    const title = `${urgent ? "URGENT: " : ""}${device.name} (${device.assetNo}) — maintenance ${threshold.label}`;
+
+    // Enough to decide whether to go now, without opening anything: what
+    // it is, where it is, how long is left and how much it matters.
     const body =
       `Preventive maintenance for ${device.name}, asset ${device.assetNo}, ` +
-      `in ${device.department.name} is ${threshold.label}. ` +
-      `Scheduled date: ${iso(dueDate)}.`;
+      `in ${device.department.name} is ${threshold.label}.\n\n` +
+      `Criticality: ${device.criticality}\n` +
+      `Scheduled date: ${iso(dueDate)} (${left})`;
+
     return { device, threshold, dueDate, title, body };
   });
 

@@ -81,13 +81,15 @@ resolves to a Cloudflare address shared by many users, so every
 IP-based rate limit buckets unrelated clients together and protects
 nobody while still reporting healthy numbers.
 
-**`MAIL_DRIVER=db` stores each message so recipients can read it in the
-app, under Mail.** That is what makes the reminder engine visible on a
-public demo without sending anything.
+**`MAIL_DRIVER` anything but `smtp` records each message and stops
+there.** The row lands in `SentEmail` as an outbox — a record of what
+would have gone — and nothing in the application renders it. That is what
+makes the reminder engine demonstrable without sending anything.
 
-The alternative, `log`, discards messages after writing a line. What you
-must not do is point real SMTP at this deployment: every seeded engineer
-has an `@bioguard.local` address that does not exist. Pointing a real SMTP
+To deliver for real, set `MAIL_DRIVER=smtp` with `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `SMTP_SECURE=true` for port
+465. What you must not do is point real SMTP at the seeded demo: every
+seeded engineer
 provider at those and running the scheduler would send dozens of
 messages to invalid recipients — a fast way to get an account
 suspended for bounce rate. In `log` mode reminders are written to the
@@ -321,12 +323,12 @@ function. This is not cosmetic: too low and every client shares one
 bucket behind the proxy's address, too high and a client can spoof its
 own address through `X-Forwarded-For`.
 
-**`MAIL_DRIVER=db`** stores each message so recipients read it in the
-app, under Mail. Do not point real SMTP at this deployment: every seeded
-engineer has an `@bioguard.local` address that does not exist, and
+**`MAIL_DRIVER=db`** records each message to the `SentEmail` outbox and
+sends nothing. Do not point real SMTP at a seeded deployment: every
+seeded engineer has an `@bioguard.local` address that does not exist, and
 running the sweep against a real provider would send dozens of messages
 to invalid recipients — a fast way to have an account suspended for
-bounce rate.
+bounce rate. Real delivery needs real addresses on the users first.
 
 ### Migrations do not run in the build
 

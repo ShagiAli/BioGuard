@@ -28,7 +28,6 @@ import { equipmentRouter } from "./modules/equipment/routes.js";
 import { maintenanceRouter } from "./modules/maintenance/routes.js";
 import { adminRouter } from "./modules/admin/routes.js";
 import { notificationsRouter } from "./modules/notifications/routes.js";
-import { mailRouter } from "./modules/mail/routes.js";
 import { auditRouter } from "./modules/audit/routes.js";
 import { alertsRouter } from "./modules/alerts/routes.js";
 import { workOrdersRouter } from "./modules/work-orders/routes.js";
@@ -148,7 +147,6 @@ export function createApp() {
   app.use("/api/maintenance", maintenanceRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/notifications", notificationsRouter);
-  app.use("/api/mail", mailRouter);
   app.use("/api/audit", auditRouter);
   app.use("/api/alerts", alertsRouter);
   app.use("/api/work-orders", workOrdersRouter);

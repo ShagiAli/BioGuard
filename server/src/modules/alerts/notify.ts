@@ -6,23 +6,46 @@
  * arrive in the same inbox rather than in two parallel systems the reader
  * has to check separately.
  */
-import type { Alert, Equipment, Priority } from "@prisma/client";
+import type { Alert, Equipment, Priority, Role } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { sendMailMany } from "../../lib/email.js";
 import { logger } from "../../lib/logger.js";
 import { env } from "../../env.js";
+import { SLA_RESPONSE_MINUTES } from "../../lib/sla.js";
 import { alertNumber, notifyLevelFor } from "./workflow.js";
 
 type AlertWithEquipment = Alert & { equipment: Pick<Equipment, "name" | "assetNo"> };
+
+const PRIORITY_LABEL: Record<Priority, string> = {
+  EMERGENCY: "Emergency",
+  MEDIUM: "Medium",
+  LOW: "Low",
+};
+
+/** How long there is to acknowledge, said the way a person would say it. */
+function responseWindow(priority: Priority): string {
+  const minutes = SLA_RESPONSE_MINUTES[priority];
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = minutes / 60;
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
 
 /**
  * Everyone who triages. An alert addressed to a single named person goes
  * unread the day that person is off, so it goes to the desk rather than
  * the individual.
+ *
+ * Managers join the list for emergencies only. They are accountable for
+ * the estate, so a device down urgently is theirs to know about — but
+ * copying them on every routine fault is how a person learns to filter
+ * the sender, and then misses the one that mattered.
  */
-async function triageRecipients() {
+async function triageRecipients(priority: Priority) {
+  const roles: Role[] =
+    priority === "EMERGENCY" ? ["HEAD_OF_ALERTS", "ADMIN", "MANAGER"] : ["HEAD_OF_ALERTS", "ADMIN"];
+
   return prisma.user.findMany({
-    where: { role: { in: ["HEAD_OF_ALERTS", "ADMIN"] }, isActive: true },
+    where: { role: { in: roles }, isActive: true },
     select: { id: true, email: true },
   });
 }
@@ -70,7 +93,7 @@ const describe = (alert: AlertWithEquipment) =>
 
 /** A new alert goes to whoever is triaging. */
 export async function notifyRaised(alert: AlertWithEquipment) {
-  const recipients = await triageRecipients();
+  const recipients = await triageRecipients(alert.priority);
   await deliver({
     alert,
     recipientIds: recipients.map((r) => r.id),
@@ -117,8 +140,12 @@ export async function notifyAssigned(alert: AlertWithEquipment, engineerName: st
       recipientIds: [engineer.id],
       emails: [engineer.email],
       priority: alert.priority,
-      title: `Assigned to you: ${alertNumber(alert.seq, alert.openedAt)} — ${describe(alert)}`,
-      body: `${describe(alert)} has been assigned to you.\n\n${alert.description}`,
+      title: `${alert.priority === "EMERGENCY" ? "EMERGENCY: " : ""}Assigned to you: ${alertNumber(alert.seq, alert.openedAt)} — ${describe(alert)}`,
+      body:
+        `${describe(alert)} has been assigned to you.\n\n` +
+        `Priority: ${PRIORITY_LABEL[alert.priority]}\n` +
+        `Acknowledge within: ${responseWindow(alert.priority)} of the report\n\n` +
+        `Reported fault: ${alert.description}`,
     });
   }
 

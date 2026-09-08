@@ -19,9 +19,22 @@ const schema = z
     TIMEZONE: z.string().default("Europe/Istanbul"),
     DATABASE_URL: z.string().min(1),
     SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
+    // "smtp" delivers. Anything else records the message and stops
+    // there, which is what a demo with @bioguard.local addresses wants.
     MAIL_DRIVER: z.enum(["smtp", "log", "db"]).default("smtp"),
     SMTP_HOST: z.string().default("localhost"),
     SMTP_PORT: z.coerce.number().default(1025),
+    // Optional because Mailpit needs neither. Every hosted provider
+    // needs both, and without them the transport was only ever able to
+    // talk to an open relay on localhost.
+    SMTP_USER: z.string().optional(),
+    SMTP_PASS: z.string().optional(),
+    // Implicit TLS, which is port 465. On 587 the connection starts
+    // plain and upgrades, and nodemailer handles that with secure=false.
+    SMTP_SECURE: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
     MAIL_FROM: z.string().default("BioGuard <noreply@bioguard.local>"),
     // Single-origin deployment: the API also serves the built frontend
     // from ./public. Keeps the session cookie first-party, which

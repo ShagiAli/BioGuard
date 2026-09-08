@@ -18,6 +18,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { recordAudit } from "../../lib/audit.js";
+import { notifyPartNeeded } from "./notify.js";
 import { alertScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import {
   canEditWorkOrder,
@@ -627,6 +628,16 @@ workOrdersRouter.post(
       entity: "WorkOrderPart",
       entityId: part.id,
       after: part,
+    });
+
+    // After the line exists, so a failure to notify cannot lose the part
+    // itself — and awaited, as the alert transitions are, so the request
+    // does not return before the people who can order it have been told.
+    // notifyPartNeeded swallows its own failures for exactly that reason.
+    await notifyPartNeeded({
+      part,
+      workOrder: { id: wo.id, seq: wo.seq, createdAt: wo.createdAt, priority: wo.priority },
+      equipment: wo.equipment,
     });
 
     res.status(201).json(part);
