@@ -43,8 +43,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await api.post("/api/auth/logout");
-    qc.clear();
-    await qc.invalidateQueries({ queryKey: ["me"] });
+
+    /*
+     * Say plainly that nobody is signed in, rather than clearing the
+     * cache and hoping the session query notices.
+     *
+     * It did not. qc.clear() removes the query this provider observes,
+     * and a removed query leaves its observer holding the last value it
+     * saw until something re-renders the component and rebuilds it.
+     * Every page inside the layout got that re-render for its own
+     * reasons and refetched; this provider has no other state, so
+     * nothing re-rendered it, and it went on reporting a signed-in user
+     * whose session the server had already destroyed. The application
+     * stayed on screen and every request it made came back 401.
+     *
+     * setQueryData writes to the query the observer is already watching,
+     * which notifies it directly. Hence the order: this first, while the
+     * query still exists, and only then drop the rest.
+     */
+    qc.setQueryData(["me"], null);
+
+    // The previous session's pages, so the next person to sign in on
+    // this machine is not shown the last one's data. Everything except
+    // the key above, which must survive to keep its observer attached.
+    qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
   };
 
   return (
