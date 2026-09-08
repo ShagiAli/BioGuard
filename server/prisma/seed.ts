@@ -19,6 +19,32 @@ import { prisma } from "../src/lib/prisma.js";
 import { generateToken, hashPassword } from "../src/lib/security.js";
 
 const HOSPITAL = "Northfield Teaching Hospital";
+
+/**
+ * Where a seeded account's mail actually goes.
+ *
+ * Built from SEED_EMAIL_BASE rather than written down, because this
+ * repository is public and an address committed to it is an address that
+ * gets scraped. Unset, every account keeps @bioguard.local — right for a
+ * demo with no mail server, and the reason MAIL_DRIVER must not be
+ * "smtp" in that state.
+ *
+ * A base of "someone@gmail.com" produces someone+admin@gmail.com,
+ * someone+engineer1@gmail.com and so on. Gmail and most providers
+ * deliver every tag to the one inbox, but the To: line still names the
+ * role that was written to — which is the whole point of routing mail by
+ * role rather than to a person.
+ *
+ * The address is the login, so signing in means using the tagged form.
+ */
+function addressFor(account: string): string {
+  const base = process.env.SEED_EMAIL_BASE?.trim();
+  if (!base) return `${account}@bioguard.local`;
+
+  const at = base.lastIndexOf("@");
+  if (at < 1) throw new Error(`SEED_EMAIL_BASE is not an email address: ${base}`);
+  return `${base.slice(0, at)}+${account}${base.slice(at)}`.toLowerCase();
+}
 const TODAY = new Date();
 
 const day = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -162,7 +188,7 @@ async function main() {
 
   const admin = await prisma.user.create({
     data: {
-      email: (process.env.SEED_ADMIN_EMAIL || "admin@bioguard.local").toLowerCase(),
+      email: (process.env.SEED_ADMIN_EMAIL || addressFor("admin")).toLowerCase(),
       passwordHash: await hashPassword(adminPassword),
       fullName: "System Administrator",
       role: "ADMIN",
@@ -175,7 +201,7 @@ async function main() {
     engineers.push(
       await prisma.user.create({
         data: {
-          email: `engineer${i + 1}@bioguard.local`,
+          email: addressFor(`engineer${i + 1}`),
           passwordHash: await hashPassword(demoPassword),
           fullName,
           role: "ENGINEER",
@@ -187,7 +213,7 @@ async function main() {
 
   await prisma.user.create({
     data: {
-      email: "manager@bioguard.local",
+      email: addressFor("manager"),
       passwordHash: await hashPassword(demoPassword),
       fullName: "Laura Hughes",
       role: "MANAGER",
@@ -196,7 +222,7 @@ async function main() {
 
   const alertsHead = await prisma.user.create({
     data: {
-      email: "alerts@bioguard.local",
+      email: addressFor("alerts"),
       passwordHash: await hashPassword(demoPassword),
       fullName: "Priya Raman",
       role: "HEAD_OF_ALERTS",
@@ -205,7 +231,7 @@ async function main() {
 
   const nurse = await prisma.user.create({
     data: {
-      email: "nurse@bioguard.local",
+      email: addressFor("nurse"),
       passwordHash: await hashPassword(demoPassword),
       fullName: "Grace Miller",
       role: "STAFF",
@@ -743,10 +769,10 @@ async function main() {
       `${overdue} overdue, ${dueSoon} due within 30 days, ${down} not in service.\n`
   );
   console.log("  Administrator:  " + admin.email + "  /  " + adminPassword);
-  console.log("  Engineer:       engineer1@bioguard.local  /  " + demoPassword);
-  console.log("  Manager:        manager@bioguard.local  /  " + demoPassword);
-  console.log("  Head of alerts: alerts@bioguard.local  /  " + demoPassword);
-  console.log("  Ward staff:     nurse@bioguard.local  /  " + demoPassword);
+  console.log("  Engineer:       " + addressFor("engineer1") + "  /  " + demoPassword);
+  console.log("  Manager:        " + addressFor("manager") + "  /  " + demoPassword);
+  console.log("  Head of alerts: " + addressFor("alerts") + "  /  " + demoPassword);
+  console.log("  Ward staff:     " + addressFor("nurse") + "  /  " + demoPassword);
   console.log("\nThese are printed once. Note them now.\n");
 }
 
