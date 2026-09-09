@@ -28,7 +28,29 @@ function Shell() {
    * a login form.
    */
   const scan = useMatch("/e/:token");
+
+  /**
+   * Setting a password, reachable whether or not somebody is signed in.
+   *
+   * These used to live only in the signed-out branch, on the reasoning
+   * that "someone following a link from their mailbox has no session by
+   * definition". That is simply not true: people read mail in the
+   * browser they are already signed in with. For them the reset page was
+   * not in the route table at all, so the catch-all sent them to the
+   * dashboard — which looks exactly like the link having signed them in,
+   * and is alarming for a link that is supposed to prove who you are.
+   *
+   * Matched here rather than duplicated into both branches, and ahead of
+   * the session probe, because neither page needs to know who is asking.
+   */
+  const resetting = useMatch("/reset-password");
+  const forgetting = useMatch("/forgot-password");
+
+  // Every match above is read before anything returns: a hook skipped on
+  // the renders where an earlier route won would change the hook order.
   if (scan?.params.token) return <Scan token={scan.params.token} />;
+  if (resetting) return <ResetPassword />;
+  if (forgetting) return <ForgotPassword />;
 
   if (loading) {
     return (
@@ -38,13 +60,10 @@ function Shell() {
     );
   }
 
-  // Signed out, but the reset flow still has to be reachable — someone
-  // following a link from their mailbox has no session by definition.
+  // The password routes are handled above, so this is everything else.
   if (!user) {
     return (
       <Routes>
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="*" element={<Login />} />
       </Routes>
     );
