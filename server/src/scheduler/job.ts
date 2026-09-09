@@ -13,8 +13,25 @@ import { logger } from "../lib/logger.js";
 import { sendMailMany } from "../lib/email.js";
 import { env } from "../env.js";
 import { addDays, thresholdFor, toDay } from "./rules.js";
+import type { Threshold } from "./rules.js";
 
 const QUEUE = "maintenance-sweep";
+
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+/** Everything a digest line needs, and nothing else. */
+interface DueDevice {
+  device: {
+    id: string;
+    name: string;
+    assetNo: string;
+    criticality: string;
+    department: { name: string };
+    engineer: { email: string } | null;
+  };
+  threshold: Threshold;
+  dueDate: Date;
+}
 
 export interface SweepResult {
   date: string;
@@ -29,9 +46,8 @@ export interface SweepResult {
  * within the reminder ladder can possibly fire, so this stays an
  * indexed range scan rather than a walk of the whole estate.
  */
-export async function runSweep(onDate: Date): Promise<SweepResult> {
+export async function runSweep(onDate: Date, collect?: DueDevice[]): Promise<SweepResult> {
   const day = toDay(onDate);
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
 
   const candidates = await prisma.equipment.findMany({
     where: {
@@ -134,17 +150,11 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
     }),
   ]);
 
-  // Deliberately thin: device, date and a link. No findings, no costs —
-  // an inbox is not a system we control.
-  await sendMailMany(
-    messages
-      .filter((m) => m.device.engineer)
-      .map((m) => ({
-        to: m.device.engineer!.email,
-        subject: m.title,
-        text: `${m.body}\n\nOpen in BioGuard: ${env.APP_URL}/equipment/${m.device.id}`,
-      }))
-  );
+  // A range collects and sends once at the end; a single night sends
+  // its own. Either way one engineer receives one message.
+  const mailable = messages.filter((m) => m.device.engineer);
+  if (collect) collect.push(...mailable);
+  else await sendDigests(mailable);
 
   logger.info(
     { date: iso(day), scanned: candidates.length, sent: messages.length },
@@ -153,14 +163,100 @@ export async function runSweep(onDate: Date): Promise<SweepResult> {
   return { date: iso(day), scanned: candidates.length, sent: messages.length };
 }
 
-/** Advances through a date range one day at a time so no threshold is skipped. */
+/**
+ * One message per engineer, listing their devices.
+ *
+ * It used to be one per device, which is right for the notification
+ * feed and wrong for a mailbox. An engineer with five overdue devices
+ * received five separate emails to reconcile, and a catch-up sweep
+ * sent a dozen near-identical messages in the same second — which
+ * reads as noise to a person and as spam to a mail provider. Both
+ * happened.
+ *
+ * Deduplicated by device, keeping the most urgent rung. A multi-day
+ * sweep walks each day in turn, so one device sitting near its due
+ * date crosses several thresholds in a single press and appeared three
+ * times in one email: "due tomorrow", "due today", "overdue by 1 day".
+ * Every rung is still recorded and still raises its own notification —
+ * this is only about what a person is asked to read.
+ *
+ * Still deliberately thin: device, where it is, how long is left and a
+ * link. No findings, no costs — an inbox is not a system we control.
+ */
+async function sendDigests(due: DueDevice[]): Promise<void> {
+  const byEngineer = new Map<string, DueDevice[]>();
+  for (const m of due) {
+    if (!m.device.engineer) continue;
+    const held = byEngineer.get(m.device.engineer.email) ?? [];
+    held.push(m);
+    byEngineer.set(m.device.engineer.email, held);
+  }
+
+  const digests = [...byEngineer.entries()].map(([to, all]) => {
+    // Most urgent rung per device, then most urgent device first.
+    const worst = new Map<string, DueDevice>();
+    for (const m of all) {
+      const seen = worst.get(m.device.id);
+      if (!seen || m.threshold.at < seen.threshold.at) worst.set(m.device.id, m);
+    }
+    const items = [...worst.values()].sort((a, b) => a.threshold.at - b.threshold.at);
+
+    const urgent = items.some((m) => m.device.criticality === "CRITICAL" && m.threshold.at <= 0);
+    const prefix = urgent ? "URGENT: " : "";
+
+    // Naming the device beats counting to one.
+    const subject =
+      items.length === 1
+        ? `${prefix}${items[0]!.device.name} (${items[0]!.device.assetNo}) — maintenance ${items[0]!.threshold.label}`
+        : `${prefix}${items.length} devices need maintenance`;
+
+    const lines = items.map((m) => {
+      const left =
+        m.threshold.at >= 0
+          ? `${m.threshold.at} day${m.threshold.at === 1 ? "" : "s"} remaining`
+          : `${-m.threshold.at} day${m.threshold.at === -1 ? "" : "s"} overdue`;
+      return (
+        `- ${m.device.name} (${m.device.assetNo}), ${m.device.department.name}\n` +
+        `  ${m.device.criticality} - ${m.threshold.label}, due ${iso(m.dueDate)} (${left})\n` +
+        `  ${env.APP_URL}/equipment/${m.device.id}`
+      );
+    });
+
+    return {
+      to,
+      subject,
+      text:
+        (items.length === 1
+          ? `One device assigned to you needs maintenance.\n\n`
+          : `${items.length} devices assigned to you need maintenance, most urgent first.\n\n`) +
+        lines.join("\n\n"),
+    };
+  });
+
+  await sendMailMany(digests);
+}
+
+/**
+ * Advances through a date range one day at a time so no threshold is
+ * skipped, and sends once at the end.
+ *
+ * The nightly run is one day, so its digest is naturally one message. A
+ * catch-up covering ninety days is ninety sweeps, and sending per sweep
+ * put ninety days of reminders in a mailbox in the same second.
+ * Collecting first means somebody who has been away gets one message
+ * about their devices rather than one per device per day they missed.
+ */
 export async function runSweepRange(from: Date, to: Date): Promise<SweepResult[]> {
   const results: SweepResult[] = [];
+  const collected: DueDevice[] = [];
+
   let cursor = addDays(from, 1);
   while (cursor.getTime() <= toDay(to).getTime()) {
-    results.push(await runSweep(cursor));
+    results.push(await runSweep(cursor, collected));
     cursor = addDays(cursor, 1);
   }
+
+  await sendDigests(collected);
   return results;
 }
 

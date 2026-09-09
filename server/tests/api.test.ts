@@ -412,6 +412,36 @@ describe("scheduler idempotency", () => {
     // The unique constraint on NotificationDispatch is what enforces this.
     expect(second.body.notificationsSent).toBe(0);
   });
+
+  it("writes one email to an engineer, however many rungs they crossed", async () => {
+    const cookie = await login(seeded.adminEmail);
+    await prisma.notificationDispatch.deleteMany();
+    await prisma.sentEmail.deleteMany();
+
+    const res = await request(app)
+      .post("/api/admin/simulate")
+      .set("Cookie", cookie)
+      .send({ days: 120 })
+      .expect(200);
+
+    expect(res.body.notificationsSent).toBeGreaterThan(0);
+
+    const mails = await prisma.sentEmail.findMany({ select: { to: true, body: true } });
+    expect(mails.length).toBeGreaterThan(0);
+
+    // One per engineer. A catch-up sweep used to send one per device per
+    // threshold, which is a dozen near-identical messages in the same
+    // second — noise to a person, and spam to a provider.
+    const recipients = new Set(mails.map((m) => m.to));
+    expect(mails.length).toBe(recipients.size);
+
+    // And a device that crossed several thresholds is listed once, with
+    // its most urgent rung, rather than three times in one message.
+    for (const mail of mails) {
+      const assets = mail.body.match(/\(([A-Z]\d+)\)/g) ?? [];
+      expect(new Set(assets).size).toBe(assets.length);
+    }
+  });
 });
 
 describe("audit trail", () => {
