@@ -64,9 +64,9 @@ forward in time — with no test-only branches.
 
 ![Device detail](docs/device.png)
 
-*A device whose service ran past the grace window. The re-base is
-recorded on the maintenance record and badged in the history, rather
-than the schedule quietly shifting.*
+*A critical device 61 days past its service date: the next due date the
+rule above produced, the maintenance history it was computed from, and
+the QR label that opens this page at the bedside without a sign-in.*
 
 ![Equipment filtered to overdue](docs/equipment.png)
 
