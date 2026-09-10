@@ -17,6 +17,7 @@
 import "dotenv/config";
 import { prisma } from "../src/lib/prisma.js";
 import { generateToken, hashPassword } from "../src/lib/security.js";
+import { graceDays, recalculateDue } from "../src/scheduler/rules.js";
 
 const HOSPITAL = "Northfield Teaching Hospital";
 
@@ -578,6 +579,10 @@ async function main() {
       installed: 365,
       price: 11700,
       warranty: 640,
+      // Twelve days late against a thirty-six day window, so the original
+      // anchor held. The lateness is recorded and the schedule is not
+      // disturbed — the ordinary case the window exists for.
+      lateBy: 12,
     },
     {
       name: "Infusion pump",
@@ -604,6 +609,11 @@ async function main() {
       installed: 2555,
       price: 21400,
       warranty: -395,
+      // Ninety days late against a seventy-three day window, so the anchor
+      // moved onto the completion date and the re-base was recorded. That
+      // record is the signal the programme slipped, which is the whole
+      // reason the rule refuses to absorb it quietly.
+      lateBy: 90,
     },
     {
       name: "Centrifuge",
@@ -646,7 +656,26 @@ async function main() {
     const engineer = engineers[i % engineers.length]!;
     const roomCode = `${dept.floor}${String(spec.room).padStart(2, "0")}`;
     const lastCompletedAt = addDays(TODAY, -spec.sincePM);
-    const nextDueAt = addDays(lastCompletedAt, meta.interval);
+
+    /*
+     * Where a device was serviced late, the resulting schedule comes from
+     * recalculateDue — the same function the API calls when an engineer
+     * files maintenance.
+     *
+     * Writing the answer down instead would let the demonstration and the
+     * rule disagree the first time the rule changed, and the rule is what
+     * the README spends its longest section on. Calling it is cheaper
+     * than keeping two copies honest.
+     */
+    const lateBy = "lateBy" in spec ? spec.lateBy : 0;
+    const previousDue = lateBy > 0 ? addDays(lastCompletedAt, -lateBy) : null;
+    const schedule = recalculateDue({
+      scheduleMode: "GRACE",
+      previousDue,
+      completedOn: lastCompletedAt,
+      intervalDays: meta.interval,
+    });
+    const nextDueAt = previousDue ? schedule.nextDue : addDays(lastCompletedAt, meta.interval);
 
     const device = await prisma.equipment.create({
       data: {
@@ -682,9 +711,18 @@ async function main() {
         completedOn: lastCompletedAt,
         engineerId: engineer.id,
         workPerformed:
-          "Scheduled service completed. Electrical safety and functional checks passed.",
+          lateBy > 0
+            ? `Scheduled service completed ${lateBy} days after the due date. ` +
+              "Electrical safety and functional checks passed."
+            : "Scheduled service completed. Electrical safety and functional checks passed.",
         cost: Math.floor(spec.price * 0.03) + 120,
         downtimeHours: 2,
+        // The three fields that make the schedule auditable. Without them
+        // you can see that work happened but not whether the programme is
+        // slipping.
+        satisfiedDueDate: previousDue,
+        latenessDays: previousDue ? schedule.latenessDays : null,
+        rebased: schedule.rebased,
         nextDueAfter: nextDueAt,
       },
     });
@@ -768,6 +806,18 @@ async function main() {
     `\nSeed complete. ${DEVICES.length} devices across 10 departments — ` +
       `${overdue} overdue, ${dueSoon} due within 30 days, ${down} not in service.\n`
   );
+
+  // The grace window is the thing worth looking at, so the seed says
+  // where to look rather than leaving it to be found.
+  for (const d of DEVICES) {
+    if (!("lateBy" in d) || d.lateBy <= 0) continue;
+    const window = graceDays(categories.get(d.name)!.interval);
+    console.log(
+      `  ${d.name} (${d.serial}) was serviced ${d.lateBy} days late against a ` +
+        `${window}-day window — ${d.lateBy <= window ? "anchor kept" : "re-based, and recorded"}`
+    );
+  }
+  console.log("");
   console.log("  Administrator:  " + admin.email + "  /  " + adminPassword);
   console.log("  Engineer:       " + addressFor("engineer1") + "  /  " + demoPassword);
   console.log("  Manager:        " + addressFor("manager") + "  /  " + demoPassword);
