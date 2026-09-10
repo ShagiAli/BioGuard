@@ -7,10 +7,11 @@
 **[Live demo](https://bio-guard-pink.vercel.app)** — credentials
 available on request.
 
-> The first request may take about a minute: the demo runs on a free
-> instance that sleeps when idle. All data is fictional — Northfield
-> Teaching Hospital does not exist, and no real patient or device
-> information is present.
+> The first request after a quiet period takes a few seconds: the API
+> is a serverless function that scales to zero, so it boots Express and
+> connects to Postgres before answering. All data is fictional —
+> Northfield Teaching Hospital does not exist, and no real patient or
+> device information is present.
 
 Hospitals run thousands of medical devices, each needing scheduled
 servicing on its own cycle. Tracking that in spreadsheets works until it
@@ -83,10 +84,10 @@ server/
   src/index.ts       process bootstrap: socket, scheduler, shutdown
   src/middleware/    session loading, role checks, query scoping
   src/modules/       auth · equipment · maintenance · admin
-                     notifications · mail · audit
-                     alerts · work-orders
+                     notifications · audit · users · views
+                     alerts · work-orders · cron
 web/ pages           dashboard · equipment · alerts · work orders
-                     notifications · mail · activity · public scan
+                     notifications · activity · people · public scan
   src/scheduler/
       rules.ts       pure scheduling logic, no I/O
       job.ts         pg-boss wiring for the nightly sweep
@@ -107,9 +108,11 @@ who was not looking only reached a person who was.
 Now every message is recorded in `SentEmail` as an outbox — proof of what
 was sent, to whom and when, with nothing rendering it — and delivered as
 well when `MAIL_DRIVER=smtp` and a server is configured. Anything else
-records and stops. The public demo records and stops, because every
-seeded engineer has an `@bioguard.local` address that does not exist and
-sending would produce nothing but bounces.
+records and stops, which is what a deployment whose addresses do not
+exist wants: seeded accounts default to `@bioguard.local`, and sending
+there would produce nothing but bounces. Real addresses come from
+`SEED_EMAIL_BASE` rather than from the seed file, because this
+repository is public and an address committed to it gets scraped.
 
 Who gets what follows from who can act on it:
 
@@ -124,6 +127,28 @@ Who gets what follows from who can act on it:
 Managers are copied on emergencies rather than on everything: a person
 copied on every routine fault learns to filter the sender, and then
 misses the one that mattered.
+
+**One message per person per sweep, not one per device.** The
+notification feed gets a row for every rung, because there each is a
+thing to click. A mailbox gets a list, because there five separate
+emails are five things to open before you know what your day looks like.
+A device that crosses several thresholds as the sweep advances appears
+once, at its most urgent rung, and the subject names it:
+
+```
+URGENT: Ventilator (A1000) and 2 more need maintenance
+```
+
+**People are managed in the application, not in the database.** An
+address is only useful while the person behind it is still there, so
+administrators and managers can correct one, invite a colleague, and
+close an account. A leaver is never edited into being their replacement:
+that account signed the services in the history, and pointing it at
+somebody new would say they serviced devices before they were hired.
+Their live work — devices watched, alerts open, repairs under way —
+hands over in one transaction; their completed work stays theirs; then
+the account closes. Deactivation is refused while any of it is
+outstanding, and says how much.
 
 ### Decisions worth explaining
 
@@ -228,12 +253,12 @@ npm run db:deploy
 npm run test:integration
 ```
 
-**65 unit tests** cover the grace window in both directions, the
+**96 unit tests** cover the grace window in both directions, the
 reminder ladder firing on its rungs and staying silent between them,
-calendar arithmetic across DST boundaries, and the guard that decides
-which database the integration suite may destroy.
+calendar arithmetic across DST boundaries, SLA response windows, and the
+guard that decides which database the integration suite may destroy.
 
-**71 integration tests** run against a real database rather than mocks,
+**87 integration tests** run against a real database rather than mocks,
 because the design leans on database constraints and mocking them would
 verify nothing. They assert properties, not just outputs:
 
@@ -244,6 +269,11 @@ verify nothing. They assert properties, not just outputs:
 - unknown request keys are rejected outright
 - running the scheduler twice over the same dates sends nothing the
   second time
+- a manager cannot edit an administrator, nor grant the role — otherwise
+  the escalation is two steps and needs no password
+- an engineer cannot be deactivated while they still hold live work
+- the sweep writes nothing to somebody who has left
+- one email per engineer, however many rungs they crossed
 
 CI runs lint, typecheck, format check, both suites against a PostgreSQL
 service container, and a frontend build.
@@ -289,11 +319,18 @@ Mailpit's inbox is at **http://localhost:8025**.
 
 A maintenance reminder system does its work once a month at 02:00, which
 makes it nearly impossible to demonstrate. Signing in as an
-administrator exposes a control that replays the real nightly sweep
-forward across future dates, against real data. Reminders appear in the
-notification centre, and the messages themselves under **Mail** — the
-same `runSweep()` the cron job calls, not a mock. Press it twice and the
-second run sends nothing, which is the idempotency constraint working.
+administrator exposes a control that replays the real nightly sweep a
+week forward, against real data — the same `runSweep()` the cron job
+calls, not a mock. Reminders appear in the notification centre, and the
+email goes wherever the engineer's address points. Press it twice and
+the second run sends nothing, which is the idempotency constraint
+working; **Reset** clears the dispatch history so the same dates can be
+replayed.
+
+One week, rather than the ninety it once offered. While a reminder was a
+row in a table, sweeping a quarter in one press was harmless. It is real
+email now, and a quarter of it arriving at once is how a sending account
+earns a rate limit.
 
 Each sweep is four queries per day regardless of fleet size: read the
 candidates, read what has already been sent, one transaction for the
