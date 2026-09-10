@@ -204,11 +204,21 @@ async function sendDigests(due: DueDevice[]): Promise<void> {
     const urgent = items.some((m) => m.device.criticality === "CRITICAL" && m.threshold.at <= 0);
     const prefix = urgent ? "URGENT: " : "";
 
-    // Naming the device beats counting to one.
+    /*
+     * The most urgent device by name, whatever the count.
+     *
+     * "2 devices need maintenance" was word for word identical for three
+     * of four engineers, and Gmail threads by subject — so four messages
+     * collapsed into two conversations and two of them looked as though
+     * they had never been sent. Leading with the device makes each
+     * subject distinct, and says the useful thing in the line somebody
+     * reads before deciding whether to open anything.
+     */
+    const first = items[0]!;
     const subject =
       items.length === 1
-        ? `${prefix}${items[0]!.device.name} (${items[0]!.device.assetNo}) — maintenance ${items[0]!.threshold.label}`
-        : `${prefix}${items.length} devices need maintenance`;
+        ? `${prefix}${first.device.name} (${first.device.assetNo}) — maintenance ${first.threshold.label}`
+        : `${prefix}${first.device.name} (${first.device.assetNo}) and ${items.length - 1} more need maintenance`;
 
     const lines = items.map((m) => {
       const left =
