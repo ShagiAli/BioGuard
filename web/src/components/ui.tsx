@@ -97,7 +97,8 @@ export function Button({
   const styles = {
     primary: "bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-300",
     ghost: "border border-slate-200 bg-white text-slate-700 hover:border-slate-300",
-    danger: "border border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-700",
+    danger:
+      "border border-slate-200 bg-white text-slate-700 hover:border-rose-300 hover:text-rose-700",
   }[variant];
 
   return (
@@ -176,13 +177,24 @@ export function Pager({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-2.5 text-xs text-slate-500">
+      {/*
+        Say the smallest true thing.
+
+        "Showing 1 to 5 of 5 results" asked somebody to read three numbers
+        to learn there were five, and two of them were the same number.
+        A range is only worth stating when part of the set is off screen.
+      */}
       <span className="tabular-nums">
         {showRange ? (
           total === 0 ? (
             "No results"
+          ) : totalPages <= 1 ? (
+            <>
+              {total} result{total === 1 ? "" : "s"}
+            </>
           ) : (
             <>
-              Showing {first} to {last} of {total} result{total === 1 ? "" : "s"}
+              {first}–{last} of {total}
             </>
           )
         ) : (
@@ -343,7 +355,9 @@ export function Tabs<T extends string>({
           >
             {label}
             {count !== undefined && (
-              <span className={`ml-1.5 tabular-nums ${active ? "text-brand-600" : "text-slate-400"}`}>
+              <span
+                className={`ml-1.5 tabular-nums ${active ? "text-brand-600" : "text-slate-400"}`}
+              >
                 {count}
               </span>
             )}
