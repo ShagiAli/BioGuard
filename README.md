@@ -4,7 +4,7 @@
 
 **Preventive maintenance management for hospital biomedical engineering departments.**
 
-**[Live demo](https://bioguard-5cx9.onrender.com)** — credentials
+**[Live demo](https://bio-guard-pink.vercel.app)** — credentials
 available on request.
 
 > The first request may take about a minute: the demo runs on a free
@@ -301,9 +301,11 @@ dispatches and notifications, one batched insert for the outbox.
 
 ## Deploying
 
-[DEPLOYMENT.md](DEPLOYMENT.md) covers a zero-cost public deployment:
-Supabase for Postgres, Render for the application, and a root
-`Dockerfile` that builds the frontend and serves it from the API.
+[DEPLOYMENT.md](DEPLOYMENT.md) covers two zero-cost public
+deployments. The live one is Vercel for the application and Supabase for
+Postgres. The other is a single container built from the root
+`Dockerfile`, which serves the frontend from the API and runs anywhere
+that takes a Dockerfile.
 
 That single-origin arrangement is not tidiness. The session cookie is
 `SameSite=Strict`, so a frontend on one domain calling an API on another

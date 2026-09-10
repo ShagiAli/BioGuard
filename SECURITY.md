@@ -100,8 +100,9 @@ derives `req.ip` by walking back through `X-Forwarded-For` by that many
 hops. Set it too low and `req.ip` is the proxy's address, so every
 client behind that proxy shares one rate-limit bucket — the limiter
 still reports numbers and protects nobody. Set it too high and a client
-can prepend its own value and choose its apparent address. On Render
-behind Cloudflare the chain is three, so `TRUST_PROXY_HOPS=3`.
+can prepend its own value and choose its apparent address. Count the
+chain for the deployment rather than copying a number: a platform's own
+proxy behind a CDN is commonly three, so `TRUST_PROXY_HOPS=3`.
 
 Because that value is a judgement about infrastructure rather than
 something the app can verify, the protections that do not depend on it

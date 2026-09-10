@@ -46,7 +46,8 @@ const schema = z
     // Number of reverse proxies in front of the app. Wrong values break
     // rate limiting silently: too low and every client shares one bucket
     // behind the proxy's address, too high and clients can spoof their
-    // own address through X-Forwarded-For. Render behind Cloudflare is 3.
+    // own address through X-Forwarded-For. A platform proxy behind a CDN
+    // is commonly 3; count the real chain rather than copying a number.
     TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(1),
 
     /**

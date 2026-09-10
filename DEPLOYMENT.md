@@ -17,16 +17,17 @@ managed Postgres elsewhere.
 
 The single-origin part is not a preference. The session cookie is
 `SameSite=Strict`, so a frontend on `example.pages.dev` calling an API
-on `example.onrender.com` would have the cookie silently dropped by the
+on `api.example.com` would have the cookie silently dropped by the
 browser on every request — login appears to succeed, everything after
 it returns 401. The root `Dockerfile` builds both and serves the
 frontend from the API's `public/` directory.
 
 ## Where to host it
 
-**Database: Neon or Supabase, not the host's free Postgres.** Render's
-free Postgres hard-expires 30 days after creation and is then deleted.
-People have lost data assuming free meant permanent. Put the database
+**Database: Neon or Supabase, not whatever free Postgres the
+application host bundles.** Those are often time-limited — several expire
+a fixed number of days after creation and are then deleted, which people
+discover by losing data they assumed was permanent. Put the database
 somewhere that persists.
 
 ### If you use Supabase
@@ -55,25 +56,26 @@ that BioGuard signs short-lived links against after running its own
 permission check. Supabase is still not deciding who may see anything.
 It is optional on both deployments — see the Vercel section.
 
-**Application: Render's free web service.** It is the only mainstream
-platform with a genuine free tier left — Railway and Fly.io both moved
-to trial or usage-based models. Free web services get 750 instance-hours
-a month and spin down after 15 minutes of inactivity, taking about a
-minute to cold-start on the next request. Acceptable for a portfolio
-demo; put a note on the README so a reviewer waits rather than assuming
-it is broken.
+**Application: anything that runs a container.** The root `Dockerfile`
+builds the frontend and serves it from the API, so any host that accepts
+a Dockerfile will do.
+
+Free tiers on such hosts generally sleep after a period of inactivity and
+take up to a minute to wake. That is acceptable for a portfolio demo, but
+worth a line on the README so a reviewer waits rather than assuming the
+thing is broken.
 
 ## Environment
 
 ```
 NODE_ENV=production
 PORT=4000
-APP_URL=https://your-app.onrender.com     # must match the real URL
+APP_URL=https://your-app.example.com      # must match the real URL
 DATABASE_URL=postgresql://...              # from Neon or Supabase
 SESSION_SECRET=<48 random bytes, base64>
 SERVE_WEB=true
 MAIL_DRIVER=db
-TRUST_PROXY_HOPS=3                         # Render behind Cloudflare
+TRUST_PROXY_HOPS=3                         # count your actual proxies
 ```
 
 `TRUST_PROXY_HOPS` is not cosmetic. Left at the default of 1, `req.ip`
@@ -102,8 +104,8 @@ demonstrates fine.
    string; for Supabase use the **Session pooler** string, not the
    direct connection — the poolers are what provide IPv4, and most PaaS
    hosts connect over IPv4.
-2. On Render, create a **Web Service** from the GitHub repository,
-   environment **Docker**, using the root `Dockerfile`.
+2. On the container host, create a service from the GitHub repository
+   using the root `Dockerfile`.
 3. Set the environment variables above. Generate the secret with
    `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`.
 4. Deploy. Migrations run automatically on start.
