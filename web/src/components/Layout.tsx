@@ -111,9 +111,22 @@ export function Layout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900">
+    /*
+     * The shell is exactly one viewport tall and does not scroll. Its two
+     * panes scroll independently inside it.
+     *
+     * It used to be min-h-screen, so a long table grew the document and
+     * took the sidebar up with it — reaching Collapse meant scrolling a
+     * list of equipment to the bottom to get at a control that has
+     * nothing to do with equipment.
+     *
+     * dvh rather than vh because on a phone the address bar changes the
+     * viewport, and 100vh is the height it would be if the bar were
+     * hidden — which leaves the last row of a list under it.
+     */
+    <div className="flex h-dvh overflow-hidden bg-slate-50 text-slate-900">
       <aside
-        className={`hidden shrink-0 flex-col bg-brand-950 transition-[width] duration-200 md:flex ${
+        className={`hidden shrink-0 flex-col overflow-y-auto bg-brand-950 transition-[width] duration-200 md:flex ${
           collapsed ? "w-[4.5rem]" : "w-60"
         }`}
       >
@@ -160,7 +173,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-5">
           <button
             onClick={() => setDrawerOpen(true)}
