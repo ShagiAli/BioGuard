@@ -70,8 +70,9 @@ the QR label that opens this page at the bedside without a sign-in.*
 
 ![Equipment filtered to overdue](docs/equipment.png)
 
-*Filters live in the URL, so a drill-down is a plain link, the back
-button behaves, and a filtered view can be sent to a colleague.*
+*Six devices past their service date, the filter shown as a chip that
+can be cleared. Filters live in the URL, so this view is a plain link —
+the back button behaves and it can be sent to a colleague.*
 
 ## Architecture
 
