@@ -104,11 +104,32 @@ can prepend its own value and choose its apparent address. Count the
 chain for the deployment rather than copying a number: a platform's own
 proxy behind a CDN is commonly three, so `TRUST_PROXY_HOPS=3`.
 
-Because that value is a judgement about infrastructure rather than
-something the app can verify, the protections that do not depend on it
-carry the real weight: the per-account login limiter keys on the
-submitted email, and account lockout after five failures is enforced in
-the database. Neither can be evaded by forging a header.
+That is checkable from outside, and cheaply. Every limiter sets
+`standardHeaders`, so `RateLimit-Remaining` on any response says which
+bucket the caller landed in. Send a request, send another carrying a
+forged address header, and compare: a counter that carries on means the
+header was ignored, and a counter that jumps back to full means the
+caller just chose a fresh bucket. Six requests against a 300-per-minute
+limit that resets in a minute, no account involved.
+
+Run against this deployment, `X-Forwarded-For` — alone, as a chain, and
+as a long chain — plus `X-Real-IP`, `Forwarded`, `X-Client-IP` and
+`X-Vercel-Forwarded-For` all landed in the same bucket. The platform
+replaces the header at its edge, so with one trusted hop `req.ip` is the
+real client address and `TRUST_PROXY_HOPS=1` is right.
+
+Worth knowing before repeating that test: the same setting fails it
+locally. With no proxy in front, the immediate peer is whoever is
+calling, so one trusted hop means the app trusts the caller's own
+header. Identical configuration, opposite result — which is why the
+question can only be settled against the real deployment, and why moving
+this application behind a CDN means changing the number in the same
+commit.
+
+The protections that do not depend on the value carry weight regardless:
+the per-account login limiter keys on the submitted email, and account
+lockout after five failures is enforced in the database. Neither can be
+evaded by forging a header.
 
 **`NODE_ENV=development` exposes error details in responses.** The
 error handler includes the exception message and a stack excerpt only
