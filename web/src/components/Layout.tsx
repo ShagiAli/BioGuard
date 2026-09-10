@@ -112,13 +112,18 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     /*
-     * The shell is exactly one viewport tall and does not scroll. Its two
-     * panes scroll independently inside it.
+     * The shell is exactly one viewport tall and does not scroll. The nav
+     * stays put; everything to the right of it scrolls as one piece.
      *
      * It used to be min-h-screen, so a long table grew the document and
      * took the sidebar up with it — reaching Collapse meant scrolling a
      * list of equipment to the bottom to get at a control that has
      * nothing to do with equipment.
+     *
+     * The first attempt pinned the top bar and the scheduler bar as well,
+     * which nobody asked for and which was worse: content scrolled up and
+     * disappeared under an opaque bar with no cue that it had. Only the
+     * nav is fixed. The header scrolls away with the page it belongs to.
      *
      * dvh rather than vh because on a phone the address bar changes the
      * viewport, and 100vh is the height it would be if the bar were
@@ -173,7 +178,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-auto">
         <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-5">
           <button
             onClick={() => setDrawerOpen(true)}
@@ -207,10 +212,12 @@ export function Layout({ children }: { children: ReactNode }) {
           positioned absolutely without an anchor of its own. Tailwind's
           sr-only is position:absolute, and with no positioned ancestor
           its box resolved against the document — a one-pixel, invisible
-          label sitting at y=1418 that gave the page 799px of scroll it
-          had no content for.
+          label that gave the page 799px of scroll it had no content for.
+
+          The scrolling happens on the column above, not here, so the top
+          bar travels with the content instead of covering it.
         */}
-        <main className="relative flex-1 overflow-auto p-4 md:p-5">{children}</main>
+        <main className="relative flex-1 p-4 md:p-5">{children}</main>
       </div>
     </div>
   );
