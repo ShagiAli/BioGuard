@@ -202,7 +202,15 @@ export function Layout({ children }: { children: ReactNode }) {
 
         {oversees && <SchedulerWarning />}
         {user?.role === "ADMIN" && <SimulateBar />}
-        <main className="flex-1 overflow-auto p-4 md:p-5">{children}</main>
+        {/*
+          relative so this is the containing block for anything inside it
+          positioned absolutely without an anchor of its own. Tailwind's
+          sr-only is position:absolute, and with no positioned ancestor
+          its box resolved against the document — a one-pixel, invisible
+          label sitting at y=1418 that gave the page 799px of scroll it
+          had no content for.
+        */}
+        <main className="relative flex-1 overflow-auto p-4 md:p-5">{children}</main>
       </div>
     </div>
   );
