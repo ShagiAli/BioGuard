@@ -26,6 +26,7 @@ interface Seeded {
   adminEmail: string;
   nurseEmail: string;
   headEmail: string;
+  deptHeadEmail: string;
   sameDeptEngineerEmail: string;
   ownDeviceId: string;
   otherDeviceId: string;
@@ -148,6 +149,17 @@ beforeAll(async () => {
       role: "HEAD_OF_ALERTS",
     },
   });
+  // Accepts or sends back finished repairs on ICU devices, and is the
+  // only role besides ADMIN that can now close one.
+  const deptHead = await prisma.user.create({
+    data: {
+      email: "dept.head@test.local",
+      passwordHash: hash,
+      fullName: "Head of Intensive Care",
+      role: "HEAD_OF_DEPARTMENT",
+      departmentId: icu.id,
+    },
+  });
 
   const base = {
     categoryId: category.id,
@@ -194,6 +206,7 @@ beforeAll(async () => {
     adminEmail: admin.email,
     nurseEmail: nurse.email,
     headEmail: head.email,
+    deptHeadEmail: deptHead.email,
     sameDeptEngineerEmail: sameDept.email,
     ownDeviceId: ownDevice.id,
     otherDeviceId: otherDevice.id,
@@ -946,6 +959,187 @@ describe("work orders", () => {
     expect(still.status).toBe("AWAITING_PARTS");
   });
 
+  // ---------------------------------------------------------- review
+
+  /** A completed repair, sitting in front of the head who must accept it. */
+  async function awaitingReview(priority = "MEDIUM") {
+    const alert = await assignedAlert(priority);
+    const engineer = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", engineer)
+      .send({ alertId: alert.id })
+      .expect(201);
+
+    await prisma.sentEmail.deleteMany();
+    await prisma.notification.deleteMany();
+
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", engineer)
+      .send({ status: "COMPLETED" })
+      .expect(200);
+
+    return { id: wo.body.id as string, engineer };
+  }
+
+  it("will not let an engineer sign off their own repair", async () => {
+    const { id, engineer } = await awaitingReview();
+
+    /*
+     * The whole point of the gate. A repair accepted by the person who
+     * performed it has not been reviewed, it has been asserted.
+     */
+    await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", engineer)
+      .send({ repairActions: "Replaced board.", finalResolution: "Back in service." })
+      .expect(403);
+
+    await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", engineer)
+      .send({ reason: "Looks fine to me." })
+      .expect(403);
+  });
+
+  it("tells the head of the department that work is waiting on them", async () => {
+    const { id } = await awaitingReview();
+
+    // Nobody opens a page they were not told to open.
+    const mail = await prisma.sentEmail.findFirstOrThrow({ where: { to: "dept.head@test.local" } });
+    expect(mail.subject).toContain("Ready for review");
+    expect(mail.body).toContain(id);
+
+    const head = await prisma.user.findFirstOrThrow({ where: { email: seeded.deptHeadEmail } });
+    const seen = await prisma.notification.count({ where: { recipientId: head.id } });
+    expect(seen).toBe(1);
+  });
+
+  it("sends a repair back with a reason, and tells the engineer why", async () => {
+    const { id } = await awaitingReview();
+    const headCookie = await login(seeded.deptHeadEmail);
+    await prisma.sentEmail.deleteMany();
+
+    const sent = await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", headCookie)
+      .send({ reason: "Device still alarms on self-test." })
+      .expect(200);
+
+    // Open again, and the device does not go back to the ward.
+    expect(sent.body.status).toBe("IN_REPAIR");
+    expect(sent.body.rejectionReason).toBe("Device still alarms on self-test.");
+    expect(sent.body.completedAt).toBeNull();
+
+    const device = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+    expect(device.operationalStatus).toBe("UNDER_REPAIR");
+
+    /*
+     * The reason travels with the rejection. Sending somebody back to a
+     * device without saying what was wrong is how the same repair gets
+     * done twice.
+     */
+    const told = await prisma.sentEmail.findFirstOrThrow({ where: { to: seeded.engineerEmail } });
+    expect(told.subject).toContain("Sent back");
+    expect(told.body).toContain("Device still alarms on self-test.");
+    expect(told.body).toContain("Head of Intensive Care");
+  });
+
+  it("refuses a rejection that does not say why", async () => {
+    const { id } = await awaitingReview();
+    const headCookie = await login(seeded.deptHeadEmail);
+
+    await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", headCookie)
+      .send({})
+      .expect(400);
+
+    await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", headCookie)
+      .send({ reason: "   " })
+      .expect(400);
+
+    // Still completed, because nothing happened.
+    const wo = await prisma.workOrder.findUniqueOrThrow({ where: { id } });
+    expect(wo.status).toBe("COMPLETED");
+  });
+
+  it("keeps a head out of another department's repairs", async () => {
+    const { id } = await awaitingReview();
+
+    const elsewhere = await prisma.department.findFirstOrThrow({
+      where: { name: { not: "Intensive care" } },
+    });
+    await prisma.user.create({
+      data: {
+        email: "other.head@test.local",
+        passwordHash: await hashPassword(PASSWORD),
+        fullName: "Head of Somewhere Else",
+        role: "HEAD_OF_DEPARTMENT",
+        departmentId: elsewhere.id,
+      },
+    });
+    const outsider = await login("other.head@test.local");
+
+    /*
+     * 404 rather than 403: the scope rule hides other departments'
+     * repairs entirely, and a 403 would confirm this one exists.
+     */
+    await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", outsider)
+      .send({ reason: "Not my ward, but I have opinions." })
+      .expect(404);
+  });
+
+  it("forgets the old reason when the work is done again", async () => {
+    const { id, engineer } = await awaitingReview();
+    const headCookie = await login(seeded.deptHeadEmail);
+
+    await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", headCookie)
+      .send({ reason: "Still alarms." })
+      .expect(200);
+
+    const again = await request(app)
+      .patch(`/api/work-orders/${id}`)
+      .set("Cookie", engineer)
+      .send({ status: "COMPLETED" })
+      .expect(200);
+
+    // Last week's complaint must not sit beside this week's work.
+    expect(again.body.rejectionReason).toBeNull();
+    expect(again.body.rejectedAt).toBeNull();
+  });
+
+  it("lets the head accept the repair and return the device", async () => {
+    const { id } = await awaitingReview();
+    const headCookie = await login(seeded.deptHeadEmail);
+
+    await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", headCookie)
+      .send({ repairActions: "Replaced board.", finalResolution: "Back in service." })
+      .expect(200);
+
+    const device = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+    expect(device.operationalStatus).toBe("OPERATIONAL");
+
+    // The engineer who did the work signs the history, not the reviewer.
+    const engineerRow = await prisma.user.findFirstOrThrow({
+      where: { email: seeded.engineerEmail },
+    });
+    const record = await prisma.maintenanceRecord.findFirstOrThrow({
+      where: { equipmentId: seeded.ownDeviceId },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(record.engineerId).toBe(engineerRow.id);
+  });
+
   it("refuses to close before the work is marked complete", async () => {
     const alert = await assignedAlert();
     const cookie = await login(seeded.engineerEmail);
@@ -956,7 +1150,7 @@ describe("work orders", () => {
 
     await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
-      .set("Cookie", cookie)
+      .set("Cookie", await login(seeded.deptHeadEmail))
       .send({ repairActions: "Replaced board.", finalResolution: "Back in service." })
       .expect(409);
   });
@@ -978,7 +1172,7 @@ describe("work orders", () => {
 
     const closed = await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
-      .set("Cookie", cookie)
+      .set("Cookie", await login(seeded.deptHeadEmail))
       .send({
         repairActions: "Replaced power supply board.",
         finalResolution: "Tested and returned to service.",
@@ -1021,7 +1215,7 @@ describe("work orders", () => {
       .send({ status: "COMPLETED" });
     await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
-      .set("Cookie", engineer)
+      .set("Cookie", await login(seeded.deptHeadEmail))
       .send({ repairActions: "Done.", finalResolution: "Fine." })
       .expect(200);
 
@@ -1150,7 +1344,7 @@ describe("parts", () => {
     // The device must not go back to the ward with a part still on order.
     const refused = await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
-      .set("Cookie", cookie)
+      .set("Cookie", await login(seeded.deptHeadEmail))
       .send({ repairActions: "Done.", finalResolution: "Fine." })
       .expect(409);
     expect(refused.body.error).toMatch(/outstanding/);
@@ -1181,7 +1375,7 @@ describe("parts", () => {
 
     await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
-      .set("Cookie", cookie)
+      .set("Cookie", await login(seeded.deptHeadEmail))
       .send({ repairActions: "Fitted seal kit.", finalResolution: "Leak stopped." })
       .expect(200);
   });
@@ -1276,7 +1470,7 @@ describe("parts", () => {
       .send({ status: "COMPLETED" });
     await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
-      .set("Cookie", cookie)
+      .set("Cookie", await login(seeded.deptHeadEmail))
       .send({ repairActions: "No parts needed.", finalResolution: "Reseated connector." })
       .expect(200);
 

@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Lock } from "lucide-react";
+import { ArrowLeft, Lock, RotateCcw } from "lucide-react";
 import {
   api,
   ApiError,
@@ -45,6 +45,7 @@ export function WorkOrderDetail() {
   const qc = useQueryClient();
   const [error, setError] = useState("");
   const [closing, setClosing] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
 
   const query = useQuery({
     queryKey: ["work-order", id],
@@ -72,6 +73,15 @@ export function WorkOrderDetail() {
   const close = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post(`/api/work-orders/${id}/close`, body),
     onSuccess: refresh,
+    onError: fail,
+  });
+
+  const reject = useMutation({
+    mutationFn: (reason: string) => api.post(`/api/work-orders/${id}/reject`, { reason }),
+    onSuccess: () => {
+      setRejecting(false);
+      refresh();
+    },
     onError: fail,
   });
 
@@ -103,7 +113,20 @@ export function WorkOrderDetail() {
       .sort()[0] ?? null;
   const isClosed = wo.status === "CLOSED";
   const canEdit = !isClosed || user?.role === "ADMIN";
-  const canClose = !isClosed && wo.status === "COMPLETED";
+
+  /*
+   * Accepting or sending back a repair belongs to the head of the
+   * device's department, and to administrators where no head is
+   * appointed. Not to the engineer: work signed off by whoever performed
+   * it has not been reviewed.
+   *
+   * The server decides this too, and its answer is the one that counts.
+   * Hiding the buttons only spares an engineer from pressing something
+   * that was always going to refuse them.
+   */
+  const reviews = user?.role === "HEAD_OF_DEPARTMENT" || user?.role === "ADMIN";
+  const awaitingReview = !isClosed && wo.status === "COMPLETED";
+  const canClose = awaitingReview && reviews;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -129,9 +152,39 @@ export function WorkOrderDetail() {
         </div>
 
         {canClose && (
-          <Button onClick={() => setClosing(true)}>Complete and close</Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setRejecting(true)}>
+              Send back
+            </Button>
+            <Button onClick={() => setClosing(true)}>Accept and close</Button>
+          </div>
         )}
       </div>
+
+      {/*
+        The engineer's copy of the reason. It is emailed to them as well,
+        but somebody who opens the repair to work on it should not have to
+        go back to their inbox to find out what was wrong with it.
+      */}
+      {wo.rejectionReason && !isClosed && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <RotateCcw size={15} className="mt-0.5 shrink-0 text-amber-500" />
+          <span>
+            <span className="font-medium">Sent back {formatDate(wo.rejectedAt)}.</span>{" "}
+            {wo.rejectionReason}
+          </span>
+        </div>
+      )}
+
+      {awaitingReview && !reviews && (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          <Lock size={15} className="mt-0.5 shrink-0 text-sky-400" />
+          <span>
+            Waiting for the head of {wo.equipment.department.name} to check the device. It stays
+            out of service until they accept the repair.
+          </span>
+        </div>
+      )}
 
       {isClosed && (
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -298,6 +351,78 @@ export function WorkOrderDetail() {
           onConfirm={(body) => close.mutate(body)}
         />
       )}
+
+      {rejecting && (
+        <RejectDialog
+          busy={reject.isPending}
+          device={wo.equipment.name}
+          engineer={wo.engineer.fullName}
+          onCancel={() => setRejecting(false)}
+          onConfirm={(reason) => reject.mutate(reason)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sending a repair back.
+ *
+ * The reason is required here as well as on the server, because a form
+ * that lets you press the button and then refuses you has simply moved
+ * the argument later. It is the whole content of what the engineer
+ * receives, so the placeholder asks for the thing that helps them.
+ */
+function RejectDialog({
+  busy,
+  device,
+  engineer,
+  onCancel,
+  onConfirm,
+}: {
+  busy: boolean;
+  device: string;
+  engineer: string;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-auto bg-slate-900/40 p-4">
+      <div className="mt-8 w-full max-w-lg rounded-lg border border-slate-200 bg-white shadow-xl">
+        <header className="border-b border-slate-200 px-4 py-3">
+          <h2 className="text-sm font-medium text-slate-900">Send the repair back</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {engineer} is emailed the reason and {device} stays out of service.
+          </p>
+        </header>
+
+        <div className="p-4">
+          <label className="block">
+            <span className="text-xs uppercase tracking-wide text-slate-500">
+              What is still wrong
+            </span>
+            <textarea
+              rows={3}
+              autoFocus
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="What you saw when you checked the device"
+              className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm outline-none focus:border-teal-500"
+            />
+          </label>
+        </div>
+
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button disabled={!reason.trim() || busy} onClick={() => onConfirm(reason.trim())}>
+            {busy ? "Sending back…" : "Send back"}
+          </Button>
+        </footer>
+      </div>
     </div>
   );
 }

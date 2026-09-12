@@ -25,7 +25,7 @@ import { api, ApiError, titleCase } from "../lib/api";
 import { useAuth } from "../auth";
 import { Badge, Button, Card, ErrorNote, Spinner } from "../components/ui";
 
-type Role = "ADMIN" | "MANAGER" | "HEAD_OF_ALERTS" | "ENGINEER" | "STAFF";
+type Role = "ADMIN" | "MANAGER" | "HEAD_OF_ALERTS" | "HEAD_OF_DEPARTMENT" | "ENGINEER" | "STAFF";
 
 interface Person {
   id: string;
@@ -45,6 +45,7 @@ const ROLE_LABELS: Record<Role, string> = {
   ADMIN: "Administrator",
   MANAGER: "Manager",
   HEAD_OF_ALERTS: "Head of alerts",
+  HEAD_OF_DEPARTMENT: "Head of department",
   ENGINEER: "Engineer",
   STAFF: "Ward staff",
 };
@@ -54,6 +55,7 @@ const ROLE_RECEIVES: Record<Role, string> = {
   ADMIN: "Emergencies, and parts waiting to be ordered",
   MANAGER: "Emergencies, and parts waiting to be ordered",
   HEAD_OF_ALERTS: "Every fault reported, as it is raised",
+  HEAD_OF_DEPARTMENT: "Repairs on their department's devices, waiting to be accepted",
   ENGINEER: "Their own devices falling due, and faults assigned to them",
   STAFF: "What happened to the faults they reported",
 };

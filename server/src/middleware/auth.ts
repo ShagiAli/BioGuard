@@ -159,6 +159,7 @@ export function triagesAlerts(user: SessionUser): boolean {
  *
  *  - triage roles and managers see the whole stream
  *  - an engineer sees what is assigned to them, plus their department's
+ *  - a head of department sees their department's
  *  - everyone else sees what they raised
  *
  * Ward staff are scoped to what they raised rather than to their
@@ -177,5 +178,30 @@ export function alertScope(user: SessionUser) {
     };
   }
 
+  /*
+   * A head of department reviews finished repairs on their own ward's
+   * devices, which they cannot do without being able to open them.
+   *
+   * Spelled out rather than left to the fall-through below, which scopes
+   * to what the person raised: a reviewer raises nothing, so that branch
+   * would have shown them an empty list and made the role look broken
+   * rather than unscoped.
+   *
+   * A head with no department is a misconfiguration, not a superuser.
+   * They see nothing until somebody assigns them one.
+   */
+  if (user.role === "HEAD_OF_DEPARTMENT") {
+    if (!user.departmentId) return { id: { equals: NO_DEPARTMENT } };
+    return { equipment: { departmentId: user.departmentId } };
+  }
+
   return { raisedById: user.id };
 }
+
+/**
+ * A uuid that is not an id, for the scope that must match nothing.
+ *
+ * Returning {} would be the whole estate, and returning undefined would
+ * be spread into the query as nothing at all — both of which fail open.
+ */
+const NO_DEPARTMENT = "00000000-0000-0000-0000-000000000000";

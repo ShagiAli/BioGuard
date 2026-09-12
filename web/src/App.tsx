@@ -16,7 +16,7 @@ import { Scan } from "./pages/Scan";
 import { ForgotPassword, ResetPassword } from "./passwordReset";
 import { Spinner } from "./components/ui";
 
-type Role = "ADMIN" | "MANAGER" | "HEAD_OF_ALERTS" | "ENGINEER" | "STAFF";
+type Role = "ADMIN" | "MANAGER" | "HEAD_OF_ALERTS" | "HEAD_OF_DEPARTMENT" | "ENGINEER" | "STAFF";
 
 /**
  * A route only some roles may open.

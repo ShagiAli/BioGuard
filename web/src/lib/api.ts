@@ -56,7 +56,13 @@ export const api = {
 
 // ------------------------------------------------------------- types
 
-export type Role = "ADMIN" | "ENGINEER" | "STAFF" | "MANAGER" | "HEAD_OF_ALERTS";
+export type Role =
+  | "ADMIN"
+  | "ENGINEER"
+  | "STAFF"
+  | "MANAGER"
+  | "HEAD_OF_ALERTS"
+  | "HEAD_OF_DEPARTMENT";
 
 export interface User {
   id: string;
@@ -481,6 +487,9 @@ export interface WorkOrder {
   };
   engineer: { id: string; fullName: string };
   closedBy: { id: string; fullName: string } | null;
+  /** Set while a repair has been sent back and not yet re-completed. */
+  rejectionReason: string | null;
+  rejectedAt: string | null;
 }
 
 export type PartStatus =

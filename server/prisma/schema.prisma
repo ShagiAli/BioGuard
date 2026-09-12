@@ -36,6 +36,12 @@ enum Role {
   /// engineer. Deliberately separate from MANAGER, which means oversight
   /// of the preventive programme and drives what oversees() unlocks.
   HEAD_OF_ALERTS
+  /// Accepts or sends back finished repairs on the devices in their own
+  /// department, and is the only role that can close one. Scoped by
+  /// departmentId: a head answers for their own ward's equipment and has
+  /// no say over anybody else's, which is the difference between this
+  /// and the estate-wide roles above.
+  HEAD_OF_DEPARTMENT
 }
 
 enum Criticality {
@@ -128,36 +134,37 @@ enum SweepTrigger {
 // ---------------------------------------------------------------- users
 
 model User {
-  id                String    @id @default(uuid(7)) @db.Uuid
-  email             String    @unique
+  id                String      @id @default(uuid(7)) @db.Uuid
+  email             String      @unique
   passwordHash      String
   fullName          String
   role              Role
-  departmentId      String?   @db.Uuid
+  departmentId      String?     @db.Uuid
   department        Department? @relation(fields: [departmentId], references: [id])
-  isActive          Boolean   @default(true)
+  isActive          Boolean     @default(true)
   // Brute-force controls
-  failedLoginCount  Int       @default(0)
+  failedLoginCount  Int         @default(0)
   lockedUntil       DateTime?
   // Any session issued before this instant is rejected.
-  passwordChangedAt DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  passwordChangedAt DateTime    @default(now())
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   sessions          Session[]
   resetTokens       PasswordResetToken[]
-  assignedEquipment Equipment[]         @relation("ResponsibleEngineer")
+  assignedEquipment Equipment[]          @relation("ResponsibleEngineer")
   maintenanceLogged MaintenanceRecord[]
   notifications     Notification[]
   auditEntries      AuditLog[]
-  notes             Note[]              @relation("NoteAuthor")
-  savedViews        SavedView[]         @relation("SavedViewOwner")
+  notes             Note[]               @relation("NoteAuthor")
+  savedViews        SavedView[]          @relation("SavedViewOwner")
 
   raisedAlerts       Alert[]     @relation("AlertRaiser")
   acknowledgedAlerts Alert[]     @relation("AlertAcknowledger")
   assignedAlerts     Alert[]     @relation("AlertAssignee")
   workOrders         WorkOrder[] @relation("WorkOrderEngineer")
   closedWorkOrders   WorkOrder[] @relation("WorkOrderCloser")
+  rejectedWorkOrders WorkOrder[] @relation("WorkOrderRejecter")
 
   @@index([role, isActive])
 }
@@ -351,12 +358,12 @@ model Notification {
 /// which also avoids sending to the fictional @bioguard.local addresses
 /// the demo data uses.
 model SentEmail {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  to        String
-  subject   String
-  body      String
-  sentAt    DateTime @default(now())
-  readAt    DateTime?
+  id      String    @id @default(uuid(7)) @db.Uuid
+  to      String
+  subject String
+  body    String
+  sentAt  DateTime  @default(now())
+  readAt  DateTime?
 
   @@index([to, sentAt])
 }
@@ -492,6 +499,18 @@ model WorkOrder {
   closedAt    DateTime?
   closedById  String?   @db.Uuid
   closedBy    User?     @relation("WorkOrderCloser", fields: [closedById], references: [id])
+
+  /// Why a reviewing head sent the repair back, and who said so.
+  ///
+  /// On the work order rather than only in the audit log, because the
+  /// engineer has to read it to act on it, and an audit log is a place
+  /// you go when you are investigating rather than when you are working.
+  /// Cleared when the work is completed again, so the field always
+  /// describes the current attempt rather than an old one.
+  rejectionReason String?
+  rejectedAt      DateTime?
+  rejectedById    String?   @db.Uuid
+  rejectedBy      User?     @relation("WorkOrderRejecter", fields: [rejectedById], references: [id])
 
   maintenanceRecordId String?            @unique @db.Uuid
   maintenanceRecord   MaintenanceRecord? @relation(fields: [maintenanceRecordId], references: [id])

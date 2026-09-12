@@ -18,7 +18,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { recordAudit } from "../../lib/audit.js";
-import { notifyPartNeeded } from "./notify.js";
+import { notifyAwaitingReview, notifyPartNeeded, notifyRepairRejected } from "./notify.js";
 import { alertScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import {
   canEditWorkOrder,
@@ -53,6 +53,9 @@ const DETAIL_INCLUDE = {
       name: true,
       assetNo: true,
       operationalStatus: true,
+      // Needed to decide who may review this repair: the head of the
+      // department the device belongs to, and nobody else's.
+      departmentId: true,
       department: { select: { name: true } },
     },
   },
@@ -323,12 +326,18 @@ workOrdersRouter.patch("/:id", requireAuth, requireRole("ENGINEER", "ADMIN"), as
 
   const nextStatus = parsed.data.status ?? before.status;
 
+  const nowComplete = parsed.data.status === "COMPLETED" && before.status !== "COMPLETED";
+
   const updated = await prisma.$transaction(async (tx) => {
     const wo = await tx.workOrder.update({
       where: { id: before.id },
       data: {
         ...parsed.data,
         completedAt: parsed.data.status === "COMPLETED" ? new Date() : before.completedAt,
+        // A fresh attempt is not the one that was sent back. Leaving the
+        // old reason on the record would have the reviewer reading last
+        // week's complaint about this week's work.
+        ...(nowComplete ? { rejectionReason: null, rejectedAt: null, rejectedById: null } : {}),
       },
       include: DETAIL_INCLUDE,
     });
@@ -352,6 +361,18 @@ workOrdersRouter.patch("/:id", requireAuth, requireRole("ENGINEER", "ADMIN"), as
     before,
     after: updated,
   });
+
+  /*
+   * Finished work does not announce itself.
+   *
+   * The engineer marks it complete and then has no further move — closing
+   * belongs to the reviewer now. If nobody is told, the repair waits on
+   * somebody happening to open the page, which is the same silence that
+   * made an unordered part invisible.
+   */
+  if (nowComplete) {
+    await notifyAwaitingReview({ workOrder: updated, equipment: updated.equipment });
+  }
 
   res.json(present(updated));
 });
@@ -425,6 +446,135 @@ const closeSchema = z
   .strict();
 
 /**
+ * May this person accept or send back work on this device?
+ *
+ * The head of the device's own department, and administrators. Not the
+ * engineer: a repair signed off by the person who performed it is not
+ * reviewed, it is asserted, and the whole point of the gate is that
+ * somebody other than the engineer looks at the device.
+ *
+ * Administrators are included because a department with no head
+ * appointed would otherwise have no way to close anything at all. That
+ * is a fallback, not a second opinion, and notifyAwaitingReview says so
+ * in the message when it uses it.
+ */
+async function mayReview(
+  user: { id: string; role: string },
+  equipment: { departmentId: string }
+): Promise<boolean> {
+  if (user.role === "ADMIN") return true;
+  if (user.role !== "HEAD_OF_DEPARTMENT") return false;
+
+  const head = await prisma.user.findFirst({
+    where: { id: user.id, departmentId: equipment.departmentId, isActive: true },
+    select: { id: true },
+  });
+  return head !== null;
+}
+
+const REVIEW_ONLY = {
+  error: "Only the head of this device's department can accept or send back a repair.",
+};
+
+/**
+ * Send a finished repair back to the engineer.
+ *
+ * The reason is required and not merely encouraged. A rejection without
+ * one sends somebody back to a device knowing only that they were wrong,
+ * which produces either the same repair again or a conversation that
+ * should have been a sentence.
+ */
+// trim() before min(1), not after: the checks run in order, so the other
+// way round measures the untrimmed string and "   " counts as a reason.
+const rejectSchema = z.object({ reason: z.string().trim().min(1).max(2000) }).strict();
+
+workOrdersRouter.post(
+  "/:id/reject",
+  requireAuth,
+  requireRole("HEAD_OF_DEPARTMENT", "ADMIN"),
+  async (req, res) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) return res.status(404).json({ error: "Work order not found." });
+
+    const parsed = rejectSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Say why the repair was not accepted." });
+    }
+
+    const before = await prisma.workOrder.findFirst({
+      where: { id: id.data, ...scoped(req.user!) },
+      include: DETAIL_INCLUDE,
+    });
+    if (!before) return res.status(404).json({ error: "Work order not found." });
+
+    if (!(await mayReview(req.user!, before.equipment))) {
+      return res.status(403).json(REVIEW_ONLY);
+    }
+
+    // Only finished work can be sent back. Anything else is already open.
+    if (before.status !== "COMPLETED") {
+      return res.status(409).json({
+        error: "Only a completed repair can be sent back.",
+      });
+    }
+
+    const rejectedAt = new Date();
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const wo = await tx.workOrder.update({
+        where: { id: before.id },
+        data: {
+          status: "IN_REPAIR",
+          // The device was never actually fixed, so the claim that it was
+          // is withdrawn rather than left standing beside the rejection.
+          completedAt: null,
+          rejectionReason: parsed.data.reason,
+          rejectedAt,
+          rejectedById: req.user!.id,
+        },
+        include: DETAIL_INCLUDE,
+      });
+
+      const deviceStatus = deviceStatusFor("IN_REPAIR");
+      if (deviceStatus) {
+        await tx.equipment.update({
+          where: { id: wo.equipmentId },
+          data: { operationalStatus: deviceStatus },
+        });
+      }
+
+      return wo;
+    });
+
+    await recordAudit({
+      actorId: req.user!.id,
+      action: "workorder.rejected",
+      entity: "WorkOrder",
+      entityId: updated.id,
+      before,
+      after: updated,
+    });
+
+    const engineer = await prisma.user.findUnique({
+      where: { id: updated.engineerId },
+      select: { id: true, email: true },
+    });
+
+    if (engineer) {
+      await notifyRepairRejected({
+        workOrder: updated,
+        equipment: updated.equipment,
+        engineer,
+        reason: parsed.data.reason,
+        reviewer: { fullName: req.user!.fullName },
+      });
+    }
+
+    res.json(present(updated));
+  }
+);
+
+/**
  * Close the work order and return the device to service.
  *
  * One transaction covers the work order, the alert, the device status and
@@ -435,7 +585,7 @@ const closeSchema = z
 workOrdersRouter.post(
   "/:id/close",
   requireAuth,
-  requireRole("ENGINEER", "ADMIN"),
+  requireRole("HEAD_OF_DEPARTMENT", "ADMIN"),
   async (req, res) => {
     const id = z.uuid().safeParse(req.params.id);
     if (!id.success) return res.status(404).json({ error: "Work order not found." });
@@ -453,6 +603,10 @@ workOrdersRouter.post(
       include: DETAIL_INCLUDE,
     });
     if (!before) return res.status(404).json({ error: "Work order not found." });
+
+    if (!(await mayReview(req.user!, before.equipment))) {
+      return res.status(403).json(REVIEW_ONLY);
+    }
 
     if (before.status === "CLOSED") {
       return res.status(409).json({ error: "This work order is already closed." });
@@ -484,7 +638,17 @@ workOrdersRouter.post(
           equipmentId: before.equipmentId,
           type: maintenanceTypeFor(before.priority),
           completedOn: closedAt,
-          engineerId: req.user!.id,
+          /*
+           * The engineer who did the repair signs it, not whoever closed
+           * the work order.
+           *
+           * These were the same person until closing became the
+           * reviewer's move; now they are not, and req.user here is the
+           * head accepting the work. A device's service history is the
+           * record of who worked on it, and handover reads it to decide
+           * what is finished work that must stay where it happened.
+           */
+          engineerId: before.engineerId,
           problem: before.alert.description,
           findings: before.findings,
           workPerformed: parsed.data.repairActions,

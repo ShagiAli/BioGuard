@@ -246,6 +246,7 @@ async function main() {
     { role: "SEED_MANAGER_EMAIL", email: addressFor("manager", "SEED_MANAGER_EMAIL") },
     { role: "SEED_ALERTS_EMAIL", email: addressFor("alerts", "SEED_ALERTS_EMAIL") },
     { role: "SEED_STAFF_EMAIL", email: addressFor("nurse", "SEED_STAFF_EMAIL") },
+    { role: "SEED_HEAD_EMAIL", email: addressFor("head", "SEED_HEAD_EMAIL") },
     ...engineerEmails.map((email, i) => ({ role: `SEED_ENGINEER_EMAILS[${i + 1}]`, email })),
   ]);
 
@@ -279,6 +280,23 @@ async function main() {
       passwordHash: await hashPassword(demoPassword),
       fullName: "Laura Hughes",
       role: "MANAGER",
+    },
+  });
+
+  /*
+   * The reviewer. Departmental rather than estate-wide: a head accepts
+   * or sends back repairs on their own ward's devices and has no say
+   * over anybody else's, so the seed gives them the department the demo
+   * device lives in. A head holding no department can review nothing,
+   * which is the misconfiguration the scope rule fails closed on.
+   */
+  await prisma.user.create({
+    data: {
+      email: addressFor("head", "SEED_HEAD_EMAIL"),
+      passwordHash: await hashPassword(demoPassword),
+      fullName: "Daniel Okoro",
+      role: "HEAD_OF_DEPARTMENT",
+      departmentId: departments.get("Intensive care")!,
     },
   });
 
@@ -890,6 +908,9 @@ async function main() {
   console.log(
     "  Ward staff:     " + addressFor("nurse", "SEED_STAFF_EMAIL") + "  /  " + demoPassword
   );
+  console.log(
+    "  Head of dept:   " + addressFor("head", "SEED_HEAD_EMAIL") + "  /  " + demoPassword
+  );
 
   // Which of these can actually be written to, said plainly, because
   // "the email never arrived" is otherwise indistinguishable from a bug.
@@ -898,6 +919,7 @@ async function main() {
     addressFor("manager", "SEED_MANAGER_EMAIL"),
     addressFor("alerts", "SEED_ALERTS_EMAIL"),
     addressFor("nurse", "SEED_STAFF_EMAIL"),
+    addressFor("head", "SEED_HEAD_EMAIL"),
   ].filter((e) => e.endsWith("@bioguard.local")).length;
 
   if (unreachable > 0) {
