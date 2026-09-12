@@ -858,6 +858,94 @@ describe("work orders", () => {
     expect(device.operationalStatus).toBe("AWAITING_PARTS");
   });
 
+  it("stops waiting once the last part is fitted", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id });
+
+    const part = await request(app)
+      .post(`/api/work-orders/${wo.body.id}/parts`)
+      .set("Cookie", cookie)
+      .send({ name: "Heater element, 230V", partNumber: "GT-HE-230" })
+      .expect(201);
+
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "AWAITING_PARTS" })
+      .expect(200);
+
+    // Up the ladder one rung at a time, as the flow requires.
+    for (const status of ["REQUESTED", "ORDERED", "RECEIVED", "INSTALLED"]) {
+      await request(app)
+        .patch(`/api/work-orders/${wo.body.id}/parts/${part.body.id}`)
+        .set("Cookie", cookie)
+        .send({ status })
+        .expect(200);
+    }
+
+    /*
+     * Nothing is outstanding, so nothing is awaited. Left as it was, the
+     * engineer cannot reach COMPLETED — that move is not on the table
+     * from AWAITING_PARTS — and the equipment list tells the hospital a
+     * fitted device is still waiting on a component.
+     */
+    const settled = await prisma.workOrder.findUniqueOrThrow({ where: { id: wo.body.id } });
+    expect(settled.status).toBe("IN_REPAIR");
+
+    const device = await prisma.equipment.findUniqueOrThrow({ where: { id: seeded.ownDeviceId } });
+    expect(device.operationalStatus).toBe("UNDER_REPAIR");
+
+    // And the way out is now open.
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "COMPLETED" })
+      .expect(200);
+  });
+
+  it("keeps waiting while any part is still outstanding", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id });
+
+    const mk = async (name: string) =>
+      (
+        await request(app)
+          .post(`/api/work-orders/${wo.body.id}/parts`)
+          .set("Cookie", cookie)
+          .send({ name })
+          .expect(201)
+      ).body;
+
+    const first = await mk("Heater element");
+    await mk("Thermal fuse");
+
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "AWAITING_PARTS" })
+      .expect(200);
+
+    for (const status of ["REQUESTED", "ORDERED", "RECEIVED", "INSTALLED"]) {
+      await request(app)
+        .patch(`/api/work-orders/${wo.body.id}/parts/${first.id}`)
+        .set("Cookie", cookie)
+        .send({ status })
+        .expect(200);
+    }
+
+    // One fitted, one still on order. The wait is not over.
+    const still = await prisma.workOrder.findUniqueOrThrow({ where: { id: wo.body.id } });
+    expect(still.status).toBe("AWAITING_PARTS");
+  });
+
   it("refuses to close before the work is marked complete", async () => {
     const alert = await assignedAlert();
     const cookie = await login(seeded.engineerEmail);

@@ -685,9 +685,48 @@ workOrdersRouter.patch(
       if (field) stamped = { [field]: new Date() };
     }
 
-    const updated = await prisma.workOrderPart.update({
-      where: { id: part.id },
-      data: { ...rest, ...(status ? { status } : {}), ...stamped },
+    /**
+     * Fitting the last part ends the waiting, so the work order stops
+     * saying it is waiting.
+     *
+     * It did not, and the consequences ran past the work order itself.
+     * AWAITING_PARTS cannot move straight to COMPLETED — the repair has
+     * to resume first — so an engineer who installed the last part was
+     * told their work "cannot move to completed" with nothing to
+     * indicate which door was open. Worse, deviceStatusFor maps that
+     * status onto the equipment list, so the device advertised
+     * "awaiting parts" to the whole hospital while the part sat fitted
+     * inside it. The list is meant to be the one place that is true
+     * without anyone maintaining it.
+     *
+     * IN_REPAIR rather than COMPLETED: the part is in, which is not the
+     * same as the job being done, and only the engineer can say that.
+     */
+    const settledNow =
+      wo.status === "AWAITING_PARTS" &&
+      partsSettled(
+        wo.parts.map((row) => (row.id === part.id ? (status ?? row.status) : row.status))
+      ).ok;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.workOrderPart.update({
+        where: { id: part.id },
+        data: { ...rest, ...(status ? { status } : {}), ...stamped },
+      });
+
+      if (settledNow) {
+        await tx.workOrder.update({ where: { id: wo.id }, data: { status: "IN_REPAIR" } });
+
+        const deviceStatus = deviceStatusFor("IN_REPAIR");
+        if (deviceStatus) {
+          await tx.equipment.update({
+            where: { id: wo.equipmentId },
+            data: { operationalStatus: deviceStatus },
+          });
+        }
+      }
+
+      return saved;
     });
 
     if (status && status !== part.status) {
@@ -698,6 +737,19 @@ workOrdersRouter.patch(
         entityId: part.id,
         before: part,
         after: updated,
+      });
+    }
+
+    if (settledNow) {
+      // Under its own action name, because a status nobody typed should
+      // still be answerable for in the log.
+      await recordAudit({
+        actorId: req.user!.id,
+        action: "workorder.parts_settled",
+        entity: "WorkOrder",
+        entityId: wo.id,
+        before: { status: wo.status },
+        after: { status: "IN_REPAIR" },
       });
     }
 
