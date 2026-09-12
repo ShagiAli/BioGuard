@@ -24,27 +24,77 @@ const HOSPITAL = "Northfield Teaching Hospital";
 /**
  * Where a seeded account's mail actually goes.
  *
- * Built from SEED_EMAIL_BASE rather than written down, because this
+ * Read from the environment rather than written down, because this
  * repository is public and an address committed to it is an address that
- * gets scraped. Unset, every account keeps @bioguard.local — right for a
- * demo with no mail server, and the reason MAIL_DRIVER must not be
- * "smtp" in that state.
+ * gets scraped.
  *
- * A base of "someone@gmail.com" produces someone+admin@gmail.com,
- * someone+engineer1@gmail.com and so on. Gmail and most providers
- * deliver every tag to the one inbox, but the To: line still names the
- * role that was written to — which is the whole point of routing mail by
- * role rather than to a person.
+ * This was one SEED_EMAIL_BASE tagged per role — someone+engineer1@… —
+ * so a single inbox could stand in for eight people. That is a testing
+ * device rather than a setup, and it cost more than it looked. The tag
+ * is part of the login, so the demo taught an address no colleague would
+ * ever have; and mail that "reached the engineer" reached one mailbox
+ * wearing eight hats, which is not the thing the routing claims to do.
  *
- * The address is the login, so signing in means using the tagged form.
+ * Now each role names its own variable. Give it a real address and that
+ * person is really written to. Leave it out and the account falls back
+ * to @bioguard.local, which does not exist — right for a checkout with
+ * no mail server, and the reason MAIL_DRIVER must not be "smtp" in that
+ * state.
+ *
+ * The role is not in the address any more. It is on the account, shown
+ * in the header and on the People page, and only an administrator or a
+ * manager can change it.
  */
-function addressFor(account: string): string {
-  const base = process.env.SEED_EMAIL_BASE?.trim();
-  if (!base) return `${account}@bioguard.local`;
+function addressFor(account: string, envVar: string): string {
+  const given = process.env[envVar]?.trim();
+  if (!given) return `${account}@bioguard.local`;
+  if (given.lastIndexOf("@") < 1) throw new Error(`${envVar} is not an email address: ${given}`);
+  return given.toLowerCase();
+}
 
-  const at = base.lastIndexOf("@");
-  if (at < 1) throw new Error(`SEED_EMAIL_BASE is not an email address: ${base}`);
-  return `${base.slice(0, at)}+${account}${base.slice(at)}`.toLowerCase();
+/**
+ * Engineers come as one comma-separated list rather than four variables,
+ * because the count is a property of the seed and not of the deployment.
+ * Supply as many real addresses as there are real people; the rest fall
+ * back, so a demo with two inboxes is two engineers who are genuinely
+ * written to and two who are scenery.
+ */
+function engineerAddresses(count: number): string[] {
+  const given = (process.env.SEED_ENGINEER_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return Array.from({ length: count }, (_, i) => {
+    const one = given[i];
+    if (!one) return `engineer${i + 1}@bioguard.local`;
+    if (one.lastIndexOf("@") < 1) {
+      throw new Error(`SEED_ENGINEER_EMAILS entry ${i + 1} is not an email address: ${one}`);
+    }
+    return one.toLowerCase();
+  });
+}
+
+/**
+ * Two roles sharing one address is a unique-index violation three
+ * hundred lines later, reported as a constraint name. Said here instead,
+ * because the fix is in .env and the person reading it is looking at
+ * their own variables.
+ */
+function refuseDuplicates(addresses: { role: string; email: string }[]): void {
+  const seen = new Map<string, string>();
+  for (const { role, email } of addresses) {
+    if (email.endsWith("@bioguard.local")) continue;
+    const held = seen.get(email);
+    if (held) {
+      throw new Error(
+        `${role} and ${held} are both set to ${email}.\n` +
+          `One address cannot be two accounts — the email column is unique, and it is the login.\n` +
+          `Give each role its own address, or leave one unset to fall back to @bioguard.local.`
+      );
+    }
+    seen.set(email, role);
+  }
 }
 const TODAY = new Date();
 
@@ -187,22 +237,33 @@ async function main() {
   const adminPassword = process.env.SEED_ADMIN_PASSWORD || generateToken(12);
   const demoPassword = process.env.SEED_DEMO_PASSWORD || generateToken(12);
 
+  const engineerNames = ["James Carter", "Sarah Bennett", "Michael Doyle", "Emma Whitfield"];
+  const engineerEmails = engineerAddresses(engineerNames.length);
+
+  // Checked before anything is written, so a clash costs nothing.
+  refuseDuplicates([
+    { role: "SEED_ADMIN_EMAIL", email: addressFor("admin", "SEED_ADMIN_EMAIL") },
+    { role: "SEED_MANAGER_EMAIL", email: addressFor("manager", "SEED_MANAGER_EMAIL") },
+    { role: "SEED_ALERTS_EMAIL", email: addressFor("alerts", "SEED_ALERTS_EMAIL") },
+    { role: "SEED_STAFF_EMAIL", email: addressFor("nurse", "SEED_STAFF_EMAIL") },
+    ...engineerEmails.map((email, i) => ({ role: `SEED_ENGINEER_EMAILS[${i + 1}]`, email })),
+  ]);
+
   const admin = await prisma.user.create({
     data: {
-      email: (process.env.SEED_ADMIN_EMAIL || addressFor("admin")).toLowerCase(),
+      email: addressFor("admin", "SEED_ADMIN_EMAIL"),
       passwordHash: await hashPassword(adminPassword),
       fullName: "System Administrator",
       role: "ADMIN",
     },
   });
 
-  const engineerNames = ["James Carter", "Sarah Bennett", "Michael Doyle", "Emma Whitfield"];
   const engineers = [];
   for (const [i, fullName] of engineerNames.entries()) {
     engineers.push(
       await prisma.user.create({
         data: {
-          email: addressFor(`engineer${i + 1}`),
+          email: engineerEmails[i]!,
           passwordHash: await hashPassword(demoPassword),
           fullName,
           role: "ENGINEER",
@@ -214,7 +275,7 @@ async function main() {
 
   await prisma.user.create({
     data: {
-      email: addressFor("manager"),
+      email: addressFor("manager", "SEED_MANAGER_EMAIL"),
       passwordHash: await hashPassword(demoPassword),
       fullName: "Laura Hughes",
       role: "MANAGER",
@@ -223,7 +284,7 @@ async function main() {
 
   const alertsHead = await prisma.user.create({
     data: {
-      email: addressFor("alerts"),
+      email: addressFor("alerts", "SEED_ALERTS_EMAIL"),
       passwordHash: await hashPassword(demoPassword),
       fullName: "Priya Raman",
       role: "HEAD_OF_ALERTS",
@@ -232,7 +293,7 @@ async function main() {
 
   const nurse = await prisma.user.create({
     data: {
-      email: addressFor("nurse"),
+      email: addressFor("nurse", "SEED_STAFF_EMAIL"),
       passwordHash: await hashPassword(demoPassword),
       fullName: "Grace Miller",
       role: "STAFF",
@@ -819,10 +880,33 @@ async function main() {
   }
   console.log("");
   console.log("  Administrator:  " + admin.email + "  /  " + adminPassword);
-  console.log("  Engineer:       " + addressFor("engineer1") + "  /  " + demoPassword);
-  console.log("  Manager:        " + addressFor("manager") + "  /  " + demoPassword);
-  console.log("  Head of alerts: " + addressFor("alerts") + "  /  " + demoPassword);
-  console.log("  Ward staff:     " + addressFor("nurse") + "  /  " + demoPassword);
+  console.log("  Engineer:       " + engineerEmails[0] + "  /  " + demoPassword);
+  console.log(
+    "  Manager:        " + addressFor("manager", "SEED_MANAGER_EMAIL") + "  /  " + demoPassword
+  );
+  console.log(
+    "  Head of alerts: " + addressFor("alerts", "SEED_ALERTS_EMAIL") + "  /  " + demoPassword
+  );
+  console.log(
+    "  Ward staff:     " + addressFor("nurse", "SEED_STAFF_EMAIL") + "  /  " + demoPassword
+  );
+
+  // Which of these can actually be written to, said plainly, because
+  // "the email never arrived" is otherwise indistinguishable from a bug.
+  const unreachable = [
+    ...engineerEmails,
+    addressFor("manager", "SEED_MANAGER_EMAIL"),
+    addressFor("alerts", "SEED_ALERTS_EMAIL"),
+    addressFor("nurse", "SEED_STAFF_EMAIL"),
+  ].filter((e) => e.endsWith("@bioguard.local")).length;
+
+  if (unreachable > 0) {
+    console.log(
+      `\n  ${unreachable} of these addresses end @bioguard.local and cannot receive mail.\n` +
+        `  Set SEED_ENGINEER_EMAILS, SEED_MANAGER_EMAIL, SEED_ALERTS_EMAIL or\n` +
+        `  SEED_STAFF_EMAIL in .env to point a role at a real inbox.`
+    );
+  }
   console.log("\nThese are printed once. Note them now.\n");
 }
 

@@ -16,6 +16,28 @@ import { Scan } from "./pages/Scan";
 import { ForgotPassword, ResetPassword } from "./passwordReset";
 import { Spinner } from "./components/ui";
 
+type Role = "ADMIN" | "MANAGER" | "HEAD_OF_ALERTS" | "ENGINEER" | "STAFF";
+
+/**
+ * A route only some roles may open.
+ *
+ * The API already refuses these, so this is not what keeps the data
+ * safe. It decides what somebody sees when they arrive anyway — by
+ * typing the path, or following a link from a colleague who has the
+ * role they do not. Without it the page mounts, asks, is refused, and
+ * renders its own failure: an engineer reads an error where the honest
+ * answer is that the page is not theirs.
+ *
+ * Sent to the dashboard rather than shown a refusal, because a refusal
+ * is only useful when the reader could do something about it, and
+ * nobody can grant themselves a role.
+ */
+function RequireRole({ allow, children }: { allow: Role[]; children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return null;
+  return allow.includes(user.role as Role) ? <>{children}</> : <Navigate to="/" replace />;
+}
+
 function Shell() {
   const { user, loading } = useAuth();
 
@@ -80,8 +102,14 @@ function Shell() {
         <Route path="/notifications" element={<Notifications />} />
         {/* Role-gated in the API too; this only hides the link. */}
         <Route path="/activity" element={<Activity />} />
-        {/* Role-gated in the API too; this only hides the link. */}
-        <Route path="/people" element={<Users />} />
+        <Route
+          path="/people"
+          element={
+            <RequireRole allow={["ADMIN", "MANAGER"]}>
+              <Users />
+            </RequireRole>
+          }
+        />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/alerts/:id" element={<AlertDetail />} />
         <Route path="/work-orders" element={<WorkOrders />} />

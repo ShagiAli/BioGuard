@@ -112,8 +112,21 @@ well when `MAIL_DRIVER=smtp` and a server is configured. Anything else
 records and stops, which is what a deployment whose addresses do not
 exist wants: seeded accounts default to `@bioguard.local`, and sending
 there would produce nothing but bounces. Real addresses come from
-`SEED_EMAIL_BASE` rather than from the seed file, because this
-repository is public and an address committed to it gets scraped.
+the environment rather than from the seed file, because this
+repository is public and an address committed to it gets scraped. Each
+role names its own variable — `SEED_MANAGER_EMAIL`,
+`SEED_ENGINEER_EMAILS` and so on — so a role that should reach somebody
+is given their address, and one that should not falls back to
+`@bioguard.local` and cannot be delivered to at all.
+
+An earlier version tagged one address per role instead,
+`someone+engineer1@…`, so a single inbox could stand in for eight
+people. It reads like a saving and is not: the tag is part of the login,
+so the demo taught an address no colleague would have, and mail that
+"reached the engineer" reached one mailbox wearing eight hats — which is
+not what routing by role claims to do. The role belongs on the account,
+where an administrator or a manager can change it, not in the address,
+where nobody can.
 
 Who gets what follows from who can act on it:
 

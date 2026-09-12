@@ -339,7 +339,16 @@ function UserMenu({
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-700 text-xs font-semibold text-white">
           {initials(fullName)}
         </span>
-        <span className="hidden text-sm text-slate-700 sm:block">{fullName}</span>
+        <span className="hidden text-left sm:block">
+          <span className="block text-sm leading-tight text-slate-700">{fullName}</span>
+          {/*
+            Not a dropdown, and deliberately not styled like one. Role is
+            assigned by an administrator or a manager on the People page;
+            showing it next to a control you can open invites the reading
+            that you may change it here.
+          */}
+          <span className="block text-xs leading-tight text-brand-700">{titleCase(role)}</span>
+        </span>
         <ChevronDown size={15} className="text-slate-400" />
       </button>
 
