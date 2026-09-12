@@ -1634,6 +1634,93 @@ describe("managing people", () => {
     expect(invite.body).toContain("/reset-password?token=");
   });
 
+  it("writes to the new address when one is corrected", async () => {
+    const admin = await login(seeded.adminEmail);
+    const created = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "typo@hospital.test", fullName: "Corrected Person", role: "ENGINEER" })
+      .expect(201);
+
+    await prisma.sentEmail.deleteMany();
+
+    await request(app)
+      .patch(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .send({ email: "right@hospital.test" })
+      .expect(200);
+
+    // The person at the new address has to be told, or the account is
+    // one nobody can reach and nobody knows exists.
+    const sent = await prisma.sentEmail.findFirstOrThrow({ where: { to: "right@hospital.test" } });
+    expect(sent.body).toContain("/reset-password?token=");
+
+    // And the old address must not be written to at all.
+    const toOld = await prisma.sentEmail.count({ where: { to: "typo@hospital.test" } });
+    expect(toOld).toBe(0);
+  });
+
+  it("kills the invitation that went to the wrong address", async () => {
+    const admin = await login(seeded.adminEmail);
+    const created = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "stranger@hospital.test", fullName: "Wrong Inbox", role: "MANAGER" })
+      .expect(201);
+
+    // The link as it landed in the wrong mailbox.
+    const first = await prisma.sentEmail.findFirstOrThrow({
+      where: { to: "stranger@hospital.test" },
+    });
+    const stale = /token=([A-Za-z0-9_-]+)/.exec(first.body)![1]!;
+
+    await request(app)
+      .patch(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .send({ email: "correct@hospital.test" })
+      .expect(200);
+
+    /*
+     * Without this the escalation needs no password and no skill: an
+     * address typed wrongly delivers a seven-day link to an account
+     * carrying a role, and correcting the address leaves it working.
+     */
+    await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token: stale, password: "whatever-they-choose" })
+      .expect(400);
+
+    // The replacement, sent to the right person, does work.
+    const fresh = await prisma.sentEmail.findFirstOrThrow({
+      where: { to: "correct@hospital.test" },
+    });
+    const good = /token=([A-Za-z0-9_-]+)/.exec(fresh.body)![1]!;
+    await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token: good, password: "a-password-of-their-own" })
+      .expect(200);
+  });
+
+  it("sends nothing when an edit leaves the address alone", async () => {
+    const admin = await login(seeded.adminEmail);
+    const created = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "settled@hospital.test", fullName: "Settled", role: "ENGINEER" })
+      .expect(201);
+
+    await prisma.sentEmail.deleteMany();
+
+    await request(app)
+      .patch(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .send({ fullName: "Settled Person" })
+      .expect(200);
+
+    // A renamed colleague has not moved house.
+    expect(await prisma.sentEmail.count()).toBe(0);
+  });
+
   it("refuses a manager the making of administrators", async () => {
     const { cookie } = await aManager();
     await request(app)

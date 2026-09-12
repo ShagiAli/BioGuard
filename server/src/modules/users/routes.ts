@@ -342,12 +342,71 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
     if (exists === 0) return res.status(400).json({ error: "That department does not exist." });
   }
 
+  /**
+   * A corrected address has to reach the person it now belongs to, and
+   * has to stop reaching the one it does not.
+   *
+   * The docblock at the top of this file has always said a corrected
+   * address goes through the reset flow. It did not: the row changed and
+   * nothing was sent, which is merely unhelpful when the old address was
+   * a typo of the right person's, and considerably worse when it was
+   * somebody else's mailbox. That invitation is a live seven-day link to
+   * an account with a role attached, sitting in a stranger's inbox, and
+   * correcting the address did nothing to it.
+   *
+   * So both halves happen together: every outstanding link dies, and a
+   * new one goes to the new address. Sessions are left alone on purpose
+   * — setting a password already revokes them all, so if the wrong
+   * person did get in, the right person accepting this invitation is
+   * what puts them out.
+   */
+  const emailChanged = !!changes.email && changes.email !== target.email;
+  const invite = emailChanged ? generateToken() : null;
+
   try {
-    const updated = await prisma.user.update({
-      where: { id: target.id },
-      data: changes,
-      select: { ...PUBLIC_FIELDS, departmentId: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.user.update({
+        where: { id: target.id },
+        data: changes,
+        select: { ...PUBLIC_FIELDS, departmentId: true },
+      });
+
+      if (invite) {
+        // Anything already issued was sent to the previous address.
+        await tx.passwordResetToken.updateMany({
+          where: { userId: target.id, usedAt: null },
+          data: { usedAt: new Date() },
+        });
+        await tx.passwordResetToken.create({
+          data: {
+            userId: target.id,
+            tokenHash: hashToken(invite),
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60_000),
+          },
+        });
+      }
+
+      return saved;
     });
+
+    if (invite) {
+      /*
+       * Worded for someone who may already have a password and someone
+       * who never had one, because the record cannot tell them apart:
+       * passwordChangedAt is set at creation, so "never set" and "set
+       * on the first day" look identical.
+       */
+      await sendMail({
+        to: updated.email,
+        subject: "Your BioGuard sign-in address has changed",
+        text:
+          `Your sign-in address for BioGuard is now ${updated.email}.\n\n` +
+          `Use it the next time you sign in. If you have not set a password ` +
+          `yet, or you need a new one, follow this link within 7 days:\n\n` +
+          `${env.APP_URL}/reset-password?token=${invite}\n\n` +
+          `Any link sent to your previous address has stopped working.`,
+      });
+    }
 
     await recordAudit({
       actorId: actor.id,
