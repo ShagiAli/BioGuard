@@ -51,3 +51,26 @@ body {
 :root {
   --logo-knockout: #ffffff;
 }
+
+
+/**
+ * One eye on a password field, not two.
+ *
+ * Edge draws its own reveal button inside every input[type=password],
+ * and the sign-in form already has a toggle of its own — so the field
+ * showed two controls doing the same job, side by side, one of them
+ * unstyled and unlabelled. Which one a person pressed changed nothing,
+ * but a form that offers the same action twice reads as broken.
+ *
+ * Ours is the one kept: it carries an aria-label that says which state
+ * pressing it will produce, it matches the rest of the form, and it
+ * appears in every browser rather than only in this one.
+ *
+ * ::-ms-clear goes with it. Same origin, same objection: a second way to
+ * empty a field that already has one, drawn by the browser rather than
+ * by us.
+ */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
