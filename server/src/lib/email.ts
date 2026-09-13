@@ -51,40 +51,68 @@ const transport =
  * The outbox write, batched. One insert for the whole sweep rather than
  * one per recipient — the difference is minutes when the database is on
  * another continent.
+ *
+ * Returns each row's id so delivery can be written back against it.
+ * Null where the insert failed, which is survivable: losing the record
+ * must never stop the message going out.
  */
-async function record(mails: Mail[]): Promise<void> {
+async function record(mails: Mail[]): Promise<(string | null)[]> {
   try {
-    await prisma.sentEmail.createMany({
+    const rows = await prisma.sentEmail.createManyAndReturn({
       data: mails.map((m) => ({ to: m.to, subject: m.subject, body: m.text })),
+      select: { id: true },
     });
+    return rows.map((r) => r.id);
   } catch (err) {
-    // The record failing must not stop the message going out. Losing the
-    // audit line is bad; losing the email is worse.
+    // Losing the audit line is bad; losing the email is worse.
     logger.error({ err, count: mails.length }, "outbox write failed");
+    return mails.map(() => null);
   }
 }
 
-async function deliver(mail: Mail): Promise<void> {
+/** Writes the outcome back, and never lets that failure matter. */
+async function markOutcome(id: string | null, data: Record<string, unknown>): Promise<void> {
+  if (!id) return;
   try {
-    if (transport) {
-      await transport.sendMail({ from: env.MAIL_FROM, ...mail });
-      return;
-    }
-    logger.info({ to: mail.to, subject: mail.subject }, "mail recorded, not sent (no transport)");
+    await prisma.sentEmail.update({ where: { id }, data });
   } catch (err) {
-    // A failed message must never take down the sweep that produced it.
+    logger.error({ err, id }, "could not record the delivery outcome");
+  }
+}
+
+async function deliver(mail: Mail, id: string | null): Promise<void> {
+  if (!transport) {
+    logger.info({ to: mail.to, subject: mail.subject }, "mail recorded, not sent (no transport)");
+    await markOutcome(id, { deliveryError: "No mail transport is configured." });
+    return;
+  }
+
+  try {
+    await transport.sendMail({ from: env.MAIL_FROM, ...mail });
+    await markOutcome(id, { deliveredAt: new Date(), deliveryError: null });
+  } catch (err) {
+    /*
+     * A failed message must never take down the sweep that produced it,
+     * which is why this is caught — but swallowing it into a log made
+     * "the email never arrived" unanswerable without the host's console.
+     * The reason is kept instead, because it is the whole value:
+     * authentication rejected and connection refused are different
+     * problems with different fixes.
+     */
+    const reason = err instanceof Error ? err.message : String(err);
     logger.error({ err, to: mail.to }, "mail delivery failed");
+    await markOutcome(id, { deliveryError: reason.slice(0, 500) });
   }
 }
 
 export async function sendMailMany(mails: Mail[]): Promise<void> {
   if (mails.length === 0) return;
-  await record(mails);
+  const ids = await record(mails);
   // SMTP has no batch equivalent; send them one at a time.
-  for (const mail of mails) await deliver(mail);
+  for (const [i, mail] of mails.entries()) await deliver(mail, ids[i] ?? null);
 }
 
 export async function sendMail(mail: Mail): Promise<void> {
-  await record([mail]);
-  await deliver(mail);
+  const [id] = await record([mail]);
+  await deliver(mail, id ?? null);
 }

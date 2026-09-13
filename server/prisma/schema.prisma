@@ -364,6 +364,21 @@ model SentEmail {
   sentAt  DateTime  @default(now())
   readAt  DateTime?
 
+  /// What happened when this was handed to the mail server.
+  ///
+  /// The outbox recorded only the attempt, so a message that never left
+  /// the building looked exactly like one sitting in somebody's spam
+  /// folder: a row saying it was written, and a log line nobody reads
+  /// saying it was not sent. "The email never arrived" could not be
+  /// answered from inside the application at all.
+  ///
+  /// Null in both means it has not been attempted yet. A failure keeps
+  /// the message rather than discarding it, because the reason is the
+  /// whole value: authentication rejected and connection refused are
+  /// different problems with different fixes.
+  deliveredAt   DateTime?
+  deliveryError String?
+
   @@index([to, sentAt])
 }
 
