@@ -13,6 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import type { Express } from "express";
+import { Role } from "@prisma/client";
 import { prisma } from "../src/lib/prisma.js";
 import { hashPassword } from "../src/lib/security.js";
 import { assertTestDatabase } from "./assert-test-database.js";
@@ -2002,6 +2003,35 @@ describe("managing people", () => {
 
     // A renamed colleague has not moved house.
     expect(await prisma.sentEmail.count()).toBe(0);
+  });
+
+  it("accepts every role the schema defines", async () => {
+    const admin = await login(seeded.adminEmail);
+    const target = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "role.trial@hospital.test", fullName: "Role Trial", role: "ENGINEER" })
+      .expect(201);
+
+    /*
+     * Every role in the database, not a list written out a second time.
+     *
+     * The list the form validated against was hand-kept, and drifted the
+     * moment a role was added: the schema, the database and the People
+     * page all knew about it while the endpoint did not, so choosing it
+     * answered "Check the details." — a complaint about the submission
+     * for a fault entirely in the receiver. Nothing in the compiler
+     * could see it, because the array had no relationship to the enum.
+     */
+    for (const role of Object.values(Role)) {
+      const res = await request(app)
+        .patch(`/api/users/${target.body.id}`)
+        .set("Cookie", admin)
+        .send({ role });
+
+      expect(res.status, `role ${role} was rejected`).toBe(200);
+      expect(res.body.role).toBe(role);
+    }
   });
 
   it("refuses a manager the making of administrators", async () => {

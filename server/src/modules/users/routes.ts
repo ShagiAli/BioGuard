@@ -14,7 +14,7 @@
  */
 import { Router } from "express";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
+import { Prisma, Role } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { recordAudit } from "../../lib/audit.js";
@@ -24,7 +24,20 @@ import { env } from "../../env.js";
 
 export const usersRouter = Router();
 
-const ROLES = ["ADMIN", "MANAGER", "HEAD_OF_ALERTS", "ENGINEER", "STAFF"] as const;
+/**
+ * Read from the generated client rather than written out again.
+ *
+ * This was a hand-kept array, and it drifted the moment a role was
+ * added: the schema, the database and the frontend all knew about the
+ * new one, while the form that assigns roles validated against a list
+ * that did not. Choosing it returned "Check the details." — a message
+ * about the submission, for a fault entirely in the receiver.
+ *
+ * Nothing in the compiler could have caught that. The array was a
+ * standalone const with no relationship to Prisma's enum, so the two
+ * were free to disagree. Derived, they cannot.
+ */
+const ROLES = Object.values(Role) as [Role, ...Role[]];
 
 /** Never includes passwordHash, and cannot be widened into doing so. */
 const PUBLIC_FIELDS = {
