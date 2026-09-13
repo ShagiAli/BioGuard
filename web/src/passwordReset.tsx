@@ -26,17 +26,38 @@ export function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const submit = async () => {
     setBusy(true);
+    setError("");
     try {
       await api.post("/api/auth/forgot-password", { email });
-    } catch {
-      // Deliberately ignored. The server answers identically whether or
-      // not the address exists, and the client must not undo that by
-      // behaving differently on an error.
-    } finally {
       setSent(true);
+    } catch (err) {
+      /*
+       * Everything used to land in an empty catch and then report
+       * success from a finally, on the reasoning that the server answers
+       * identically whether or not an address is registered and the
+       * client must not undo that.
+       *
+       * The first half is true and is kept: a 200 says nothing about
+       * whether the account exists, so the confirmation below stays
+       * deliberately vague. The second half was over-applied. A refusal
+       * carries no such information — being rate limited is a fact about
+       * the caller, not about the address — so swallowing it protected
+       * nothing and told somebody their link was on its way when the
+       * request had been turned away.
+       *
+       * Twelve attempts against a limit of five all reported success,
+       * which is a long time to spend looking for an email nobody sent.
+       */
+      setError(
+        err instanceof ApiError && err.status === 429
+          ? err.message
+          : "That did not go through. Try again in a moment."
+      );
+    } finally {
       setBusy(false);
     }
   };
@@ -59,6 +80,10 @@ export function ForgotPassword() {
             <p className="mt-1 text-sm text-slate-500">
               Enter your work email and we will send a link.
             </p>
+
+            {error && (
+              <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
+            )}
 
             <label className="mt-4 block">
               <span className="text-xs uppercase tracking-wide text-slate-500">Email</span>
