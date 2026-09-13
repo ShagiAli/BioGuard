@@ -62,7 +62,7 @@ export type Role =
   | "STAFF"
   | "MANAGER"
   | "HEAD_OF_ALERTS"
-  | "HEAD_OF_DEPARTMENT";
+  | "HEAD_OF_ENGINEERING";
 
 export interface User {
   id: string;

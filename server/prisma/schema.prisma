@@ -36,12 +36,11 @@ enum Role {
   /// engineer. Deliberately separate from MANAGER, which means oversight
   /// of the preventive programme and drives what oversees() unlocks.
   HEAD_OF_ALERTS
-  /// Accepts or sends back finished repairs on the devices in their own
-  /// department, and is the only role that can close one. Scoped by
-  /// departmentId: a head answers for their own ward's equipment and has
-  /// no say over anybody else's, which is the difference between this
-  /// and the estate-wide roles above.
-  HEAD_OF_DEPARTMENT
+  /// Accepts or sends back finished repairs, and is the only role besides
+  /// ADMIN that can close one. Estate-wide: this is the head the
+  /// engineers answer to, not a head per ward, so the department a device
+  /// belongs to does not narrow what they may review.
+  HEAD_OF_ENGINEERING
 }
 
 enum Criticality {

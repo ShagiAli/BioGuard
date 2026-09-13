@@ -92,17 +92,16 @@ interface ReviewContext {
 }
 
 /**
- * Who reviews a finished repair on this device.
+ * Who reviews a finished repair.
  *
- * The head of the department the device belongs to, and nobody else —
- * a head answers for their own ward's equipment. Administrators are the
- * fallback rather than a second reviewer: without one, a department with
- * no head appointed would leave every completed repair sitting unread,
- * which is the failure this whole gate is supposed to prevent.
+ * The head the engineers answer to, wherever the device happens to sit.
+ * Administrators are the fallback rather than a second reviewer: with no
+ * head appointed at all, every completed repair would sit unread, which
+ * is the failure this whole gate exists to prevent.
  */
-export async function reviewersFor(departmentId: string) {
+export async function reviewers() {
   const heads = await prisma.user.findMany({
-    where: { role: "HEAD_OF_DEPARTMENT", departmentId, isActive: true },
+    where: { role: "HEAD_OF_ENGINEERING", isActive: true },
     select: { id: true, email: true },
   });
   if (heads.length > 0) return { heads, viaFallback: false };
@@ -116,7 +115,7 @@ export async function reviewersFor(departmentId: string) {
 
 /** A repair is finished and waiting on somebody to accept it. */
 export async function notifyAwaitingReview({ workOrder, equipment }: ReviewContext): Promise<void> {
-  const { heads, viaFallback } = await reviewersFor(equipment.departmentId);
+  const { heads, viaFallback } = await reviewers();
   if (heads.length === 0) return;
 
   const reference = workOrderNumber(workOrder.seq, workOrder.createdAt);
@@ -126,8 +125,8 @@ export async function notifyAwaitingReview({ workOrder, equipment }: ReviewConte
     `repaired and is waiting to be checked.\n\n` +
     `Work order: ${reference}\n\n` +
     (viaFallback
-      ? `No head of department is appointed for ${equipment.department.name}, so this has ` +
-        `come to the administrators instead.\n\n`
+      ? `No head of engineering is appointed, so this has come to the ` +
+        `administrators instead.\n\n`
       : "") +
     `The device stays out of service until the repair is accepted.`;
 

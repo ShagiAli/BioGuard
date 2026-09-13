@@ -446,34 +446,29 @@ const closeSchema = z
   .strict();
 
 /**
- * May this person accept or send back work on this device?
+ * May this person accept or send back a finished repair?
  *
- * The head of the device's own department, and administrators. Not the
+ * The head the engineers answer to, and administrators. Not the
  * engineer: a repair signed off by the person who performed it is not
  * reviewed, it is asserted, and the whole point of the gate is that
  * somebody other than the engineer looks at the device.
  *
- * Administrators are included because a department with no head
- * appointed would otherwise have no way to close anything at all. That
- * is a fallback, not a second opinion, and notifyAwaitingReview says so
- * in the message when it uses it.
+ * Administrators are included because with no head appointed there would
+ * otherwise be no way to close anything at all. That is a fallback, not
+ * a second opinion, and notifyAwaitingReview says which it is in the
+ * message rather than leaving the reader to wonder why it arrived.
+ *
+ * A plain role check now the reviewer is estate-wide. It was a lookup
+ * while heads were scoped to a ward, and requireRole already refuses
+ * everybody else — this is what remains once the department stopped
+ * narrowing anything.
  */
-async function mayReview(
-  user: { id: string; role: string },
-  equipment: { departmentId: string }
-): Promise<boolean> {
-  if (user.role === "ADMIN") return true;
-  if (user.role !== "HEAD_OF_DEPARTMENT") return false;
-
-  const head = await prisma.user.findFirst({
-    where: { id: user.id, departmentId: equipment.departmentId, isActive: true },
-    select: { id: true },
-  });
-  return head !== null;
+function mayReview(user: { role: string }): boolean {
+  return user.role === "ADMIN" || user.role === "HEAD_OF_ENGINEERING";
 }
 
 const REVIEW_ONLY = {
-  error: "Only the head of this device's department can accept or send back a repair.",
+  error: "Only the head of engineering can accept or send back a repair.",
 };
 
 /**
@@ -491,7 +486,7 @@ const rejectSchema = z.object({ reason: z.string().trim().min(1).max(2000) }).st
 workOrdersRouter.post(
   "/:id/reject",
   requireAuth,
-  requireRole("HEAD_OF_DEPARTMENT", "ADMIN"),
+  requireRole("HEAD_OF_ENGINEERING", "ADMIN"),
   async (req, res) => {
     const id = z.uuid().safeParse(req.params.id);
     if (!id.success) return res.status(404).json({ error: "Work order not found." });
@@ -507,7 +502,7 @@ workOrdersRouter.post(
     });
     if (!before) return res.status(404).json({ error: "Work order not found." });
 
-    if (!(await mayReview(req.user!, before.equipment))) {
+    if (!mayReview(req.user!)) {
       return res.status(403).json(REVIEW_ONLY);
     }
 
@@ -585,7 +580,7 @@ workOrdersRouter.post(
 workOrdersRouter.post(
   "/:id/close",
   requireAuth,
-  requireRole("HEAD_OF_DEPARTMENT", "ADMIN"),
+  requireRole("HEAD_OF_ENGINEERING", "ADMIN"),
   async (req, res) => {
     const id = z.uuid().safeParse(req.params.id);
     if (!id.success) return res.status(404).json({ error: "Work order not found." });
@@ -604,7 +599,7 @@ workOrdersRouter.post(
     });
     if (!before) return res.status(404).json({ error: "Work order not found." });
 
-    if (!(await mayReview(req.user!, before.equipment))) {
+    if (!mayReview(req.user!)) {
       return res.status(403).json(REVIEW_ONLY);
     }
 

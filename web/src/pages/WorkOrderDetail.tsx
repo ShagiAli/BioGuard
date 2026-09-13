@@ -124,7 +124,7 @@ export function WorkOrderDetail() {
    * Hiding the buttons only spares an engineer from pressing something
    * that was always going to refuse them.
    */
-  const reviews = user?.role === "HEAD_OF_DEPARTMENT" || user?.role === "ADMIN";
+  const reviews = user?.role === "HEAD_OF_ENGINEERING" || user?.role === "ADMIN";
   const awaitingReview = !isClosed && wo.status === "COMPLETED";
   const canClose = awaitingReview && reviews;
 
@@ -180,8 +180,8 @@ export function WorkOrderDetail() {
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
           <Lock size={15} className="mt-0.5 shrink-0 text-sky-400" />
           <span>
-            Waiting for the head of {wo.equipment.department.name} to check the device. It stays
-            out of service until they accept the repair.
+            Waiting for the head of engineering to check the device. It stays out of service
+            until they accept the repair.
           </span>
         </div>
       )}

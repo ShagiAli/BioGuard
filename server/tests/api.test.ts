@@ -26,7 +26,7 @@ interface Seeded {
   adminEmail: string;
   nurseEmail: string;
   headEmail: string;
-  deptHeadEmail: string;
+  reviewerEmail: string;
   sameDeptEngineerEmail: string;
   ownDeviceId: string;
   otherDeviceId: string;
@@ -149,15 +149,16 @@ beforeAll(async () => {
       role: "HEAD_OF_ALERTS",
     },
   });
-  // Accepts or sends back finished repairs on ICU devices, and is the
-  // only role besides ADMIN that can now close one.
-  const deptHead = await prisma.user.create({
+  // Accepts or sends back finished repairs anywhere in the estate, and
+  // is the only role besides ADMIN that can close one. Deliberately
+  // holds no department: the role does not narrow by ward, and a
+  // fixture that gave it one would hide a scope rule that fails closed.
+  const reviewer = await prisma.user.create({
     data: {
-      email: "dept.head@test.local",
+      email: "head.eng@test.local",
       passwordHash: hash,
-      fullName: "Head of Intensive Care",
-      role: "HEAD_OF_DEPARTMENT",
-      departmentId: icu.id,
+      fullName: "Head of Engineering",
+      role: "HEAD_OF_ENGINEERING",
     },
   });
 
@@ -206,7 +207,7 @@ beforeAll(async () => {
     adminEmail: admin.email,
     nurseEmail: nurse.email,
     headEmail: head.email,
-    deptHeadEmail: deptHead.email,
+    reviewerEmail: reviewer.email,
     sameDeptEngineerEmail: sameDept.email,
     ownDeviceId: ownDevice.id,
     otherDeviceId: otherDevice.id,
@@ -1007,18 +1008,18 @@ describe("work orders", () => {
     const { id } = await awaitingReview();
 
     // Nobody opens a page they were not told to open.
-    const mail = await prisma.sentEmail.findFirstOrThrow({ where: { to: "dept.head@test.local" } });
+    const mail = await prisma.sentEmail.findFirstOrThrow({ where: { to: "head.eng@test.local" } });
     expect(mail.subject).toContain("Ready for review");
     expect(mail.body).toContain(id);
 
-    const head = await prisma.user.findFirstOrThrow({ where: { email: seeded.deptHeadEmail } });
+    const head = await prisma.user.findFirstOrThrow({ where: { email: seeded.reviewerEmail } });
     const seen = await prisma.notification.count({ where: { recipientId: head.id } });
     expect(seen).toBe(1);
   });
 
   it("sends a repair back with a reason, and tells the engineer why", async () => {
     const { id } = await awaitingReview();
-    const headCookie = await login(seeded.deptHeadEmail);
+    const headCookie = await login(seeded.reviewerEmail);
     await prisma.sentEmail.deleteMany();
 
     const sent = await request(app)
@@ -1043,12 +1044,12 @@ describe("work orders", () => {
     const told = await prisma.sentEmail.findFirstOrThrow({ where: { to: seeded.engineerEmail } });
     expect(told.subject).toContain("Sent back");
     expect(told.body).toContain("Device still alarms on self-test.");
-    expect(told.body).toContain("Head of Intensive Care");
+    expect(told.body).toContain("Head of Engineering");
   });
 
   it("refuses a rejection that does not say why", async () => {
     const { id } = await awaitingReview();
-    const headCookie = await login(seeded.deptHeadEmail);
+    const headCookie = await login(seeded.reviewerEmail);
 
     await request(app)
       .post(`/api/work-orders/${id}/reject`)
@@ -1067,37 +1068,37 @@ describe("work orders", () => {
     expect(wo.status).toBe("COMPLETED");
   });
 
-  it("keeps a head out of another department's repairs", async () => {
+  it("reviews repairs in wards the head does not belong to", async () => {
     const { id } = await awaitingReview();
 
-    const elsewhere = await prisma.department.findFirstOrThrow({
-      where: { name: { not: "Intensive care" } },
-    });
-    await prisma.user.create({
-      data: {
-        email: "other.head@test.local",
-        passwordHash: await hashPassword(PASSWORD),
-        fullName: "Head of Somewhere Else",
-        role: "HEAD_OF_DEPARTMENT",
-        departmentId: elsewhere.id,
-      },
-    });
-    const outsider = await login("other.head@test.local");
-
     /*
-     * 404 rather than 403: the scope rule hides other departments'
-     * repairs entirely, and a 403 would confirm this one exists.
+     * The head holds no department at all, which is the point: they
+     * answer for the engineers rather than for a ward.
+     *
+     * Worth asserting rather than assuming. Both scope rules decide by
+     * role, and the fall-through for one of them returns what the caller
+     * raised — a reviewer raises nothing, so a regression there does not
+     * throw or refuse. It shows an empty list, which reads as "no work
+     * today" rather than as a bug.
      */
+    const head = await prisma.user.findFirstOrThrow({ where: { email: seeded.reviewerEmail } });
+    expect(head.departmentId).toBeNull();
+
+    const cookie = await login(seeded.reviewerEmail);
+
+    const listed = await request(app).get("/api/work-orders").set("Cookie", cookie).expect(200);
+    expect(listed.body.rows.some((row: { id: string }) => row.id === id)).toBe(true);
+
     await request(app)
       .post(`/api/work-orders/${id}/reject`)
-      .set("Cookie", outsider)
-      .send({ reason: "Not my ward, but I have opinions." })
-      .expect(404);
+      .set("Cookie", cookie)
+      .send({ reason: "Checked it on the ward; still faulty." })
+      .expect(200);
   });
 
   it("forgets the old reason when the work is done again", async () => {
     const { id, engineer } = await awaitingReview();
-    const headCookie = await login(seeded.deptHeadEmail);
+    const headCookie = await login(seeded.reviewerEmail);
 
     await request(app)
       .post(`/api/work-orders/${id}/reject`)
@@ -1118,7 +1119,7 @@ describe("work orders", () => {
 
   it("lets the head accept the repair and return the device", async () => {
     const { id } = await awaitingReview();
-    const headCookie = await login(seeded.deptHeadEmail);
+    const headCookie = await login(seeded.reviewerEmail);
 
     await request(app)
       .post(`/api/work-orders/${id}/close`)
@@ -1150,7 +1151,7 @@ describe("work orders", () => {
 
     await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
-      .set("Cookie", await login(seeded.deptHeadEmail))
+      .set("Cookie", await login(seeded.reviewerEmail))
       .send({ repairActions: "Replaced board.", finalResolution: "Back in service." })
       .expect(409);
   });
@@ -1172,7 +1173,7 @@ describe("work orders", () => {
 
     const closed = await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
-      .set("Cookie", await login(seeded.deptHeadEmail))
+      .set("Cookie", await login(seeded.reviewerEmail))
       .send({
         repairActions: "Replaced power supply board.",
         finalResolution: "Tested and returned to service.",
@@ -1215,7 +1216,7 @@ describe("work orders", () => {
       .send({ status: "COMPLETED" });
     await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
-      .set("Cookie", await login(seeded.deptHeadEmail))
+      .set("Cookie", await login(seeded.reviewerEmail))
       .send({ repairActions: "Done.", finalResolution: "Fine." })
       .expect(200);
 
@@ -1344,7 +1345,7 @@ describe("parts", () => {
     // The device must not go back to the ward with a part still on order.
     const refused = await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
-      .set("Cookie", await login(seeded.deptHeadEmail))
+      .set("Cookie", await login(seeded.reviewerEmail))
       .send({ repairActions: "Done.", finalResolution: "Fine." })
       .expect(409);
     expect(refused.body.error).toMatch(/outstanding/);
@@ -1375,7 +1376,7 @@ describe("parts", () => {
 
     await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
-      .set("Cookie", await login(seeded.deptHeadEmail))
+      .set("Cookie", await login(seeded.reviewerEmail))
       .send({ repairActions: "Fitted seal kit.", finalResolution: "Leak stopped." })
       .expect(200);
   });
@@ -1470,7 +1471,7 @@ describe("parts", () => {
       .send({ status: "COMPLETED" });
     await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
-      .set("Cookie", await login(seeded.deptHeadEmail))
+      .set("Cookie", await login(seeded.reviewerEmail))
       .send({ repairActions: "No parts needed.", finalResolution: "Reseated connector." })
       .expect(200);
 

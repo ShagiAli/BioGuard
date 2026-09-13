@@ -101,7 +101,14 @@ export function equipmentScope(user: SessionUser) {
   // cannot see the device an alert names cannot judge it. Without this
   // they fall to the department branch below, hold no department, and
   // silently see nothing at all.
-  if (user.role === "ADMIN" || user.role === "MANAGER" || user.role === "HEAD_OF_ALERTS") {
+  if (
+    user.role === "ADMIN" ||
+    user.role === "MANAGER" ||
+    user.role === "HEAD_OF_ALERTS" ||
+    // The head the engineers answer to reviews repairs anywhere in the
+    // estate, and cannot judge a device they are not allowed to open.
+    user.role === "HEAD_OF_ENGINEERING"
+  ) {
     return {};
   }
   if (!user.departmentId) return { id: "00000000-0000-0000-0000-000000000000" }; // matches nothing
@@ -157,9 +164,9 @@ export function triagesAlerts(user: SessionUser): boolean {
  * Mirrors equipmentScope: centralised so that omitting it is a visible
  * mistake rather than a silent leak.
  *
- *  - triage roles and managers see the whole stream
+ *  - triage roles, managers and the head of engineering see the whole
+ *    stream
  *  - an engineer sees what is assigned to them, plus their department's
- *  - a head of department sees their department's
  *  - everyone else sees what they raised
  *
  * Ward staff are scoped to what they raised rather than to their
@@ -168,6 +175,17 @@ export function triagesAlerts(user: SessionUser): boolean {
  */
 export function alertScope(user: SessionUser) {
   if (triagesAlerts(user) || user.role === "MANAGER") return {};
+
+  /*
+   * The head of engineering reviews every finished repair, so they see
+   * every repair.
+   *
+   * Spelled out rather than left to the fall-through below, which scopes
+   * to what the person raised: a reviewer raises nothing, so that branch
+   * would show them an empty list and make the role look broken rather
+   * than unscoped.
+   */
+  if (user.role === "HEAD_OF_ENGINEERING") return {};
 
   if (user.role === "ENGINEER") {
     return {
@@ -178,30 +196,5 @@ export function alertScope(user: SessionUser) {
     };
   }
 
-  /*
-   * A head of department reviews finished repairs on their own ward's
-   * devices, which they cannot do without being able to open them.
-   *
-   * Spelled out rather than left to the fall-through below, which scopes
-   * to what the person raised: a reviewer raises nothing, so that branch
-   * would have shown them an empty list and made the role look broken
-   * rather than unscoped.
-   *
-   * A head with no department is a misconfiguration, not a superuser.
-   * They see nothing until somebody assigns them one.
-   */
-  if (user.role === "HEAD_OF_DEPARTMENT") {
-    if (!user.departmentId) return { id: { equals: NO_DEPARTMENT } };
-    return { equipment: { departmentId: user.departmentId } };
-  }
-
   return { raisedById: user.id };
 }
-
-/**
- * A uuid that is not an id, for the scope that must match nothing.
- *
- * Returning {} would be the whole estate, and returning undefined would
- * be spread into the query as nothing at all — both of which fail open.
- */
-const NO_DEPARTMENT = "00000000-0000-0000-0000-000000000000";
