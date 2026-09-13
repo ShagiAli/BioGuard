@@ -2034,6 +2034,91 @@ describe("managing people", () => {
     }
   });
 
+  it("deletes a closed account that never entered the record", async () => {
+    const admin = await login(seeded.adminEmail);
+    const created = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "never.arrived@hospital.test", fullName: "Never Arrived", role: "ENGINEER" })
+      .expect(201);
+
+    // Active accounts are not deletable, however empty. Two presses, and
+    // the first one is reversible.
+    await request(app).delete(`/api/users/${created.body.id}`).set("Cookie", admin).expect(409);
+
+    await request(app)
+      .patch(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .send({ isActive: false })
+      .expect(200);
+
+    await request(app).delete(`/api/users/${created.body.id}`).set("Cookie", admin).expect(204);
+
+    const gone = await prisma.user.findUnique({ where: { id: created.body.id } });
+    expect(gone).toBeNull();
+  });
+
+  it("will not erase somebody the record still points at", async () => {
+    const admin = await login(seeded.adminEmail);
+
+    /*
+     * Its own leaver, not the seeded engineer.
+     *
+     * Deleting is destructive by definition, so a test for it must not
+     * borrow a fixture that later tests still need intact — and the one
+     * thing under test here is history, which is quicker to give
+     * somebody than to arrange through the API.
+     */
+    const created = await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "signed.work@hospital.test", fullName: "Signed Work", role: "ENGINEER" })
+      .expect(201);
+
+    await prisma.maintenanceRecord.create({
+      data: {
+        equipmentId: seeded.ownDeviceId,
+        type: "PREVENTIVE",
+        completedOn: new Date("2026-07-01"),
+        engineerId: created.body.id,
+        workPerformed: "Annual service.",
+      },
+    });
+
+    await request(app)
+      .patch(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .send({ isActive: false })
+      .expect(200);
+
+    /*
+     * Finished work stays theirs. A hospital that cannot say who serviced
+     * a ventilator has a maintenance record worth nothing, so the answer
+     * is no — and it says how much rather than only that the answer is no.
+     */
+    const refused = await request(app)
+      .delete(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .expect(409);
+
+    expect(refused.body.error).toContain("part of the record");
+    expect(refused.body.history.services).toBe(1);
+
+    const still = await prisma.user.findUnique({ where: { id: created.body.id } });
+    expect(still).not.toBeNull();
+  });
+
+  it("keeps deletion away from administrators and from yourself", async () => {
+    const { cookie } = await aManager();
+    const admin = await prisma.user.findFirstOrThrow({ where: { email: seeded.adminEmail } });
+
+    // A manager who could delete an administrator could delete them all.
+    await request(app).delete(`/api/users/${admin.id}`).set("Cookie", cookie).expect(403);
+
+    const adminCookie = await login(seeded.adminEmail);
+    await request(app).delete(`/api/users/${admin.id}`).set("Cookie", adminCookie).expect(409);
+  });
+
   it("refuses a manager the making of administrators", async () => {
     const { cookie } = await aManager();
     await request(app)

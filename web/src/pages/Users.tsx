@@ -20,7 +20,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Pencil, UserPlus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Pencil, Trash2, UserPlus, X } from "lucide-react";
 import { api, ApiError, titleCase } from "../lib/api";
 import { useAuth } from "../auth";
 import { Badge, Button, Card, ErrorNote, Spinner } from "../components/ui";
@@ -67,6 +67,8 @@ export function Users() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [editing, setEditing] = useState<string | null>(null);
+  const [showFormer, setShowFormer] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   /** Set when a deactivation was refused because work is still held. */
@@ -109,6 +111,21 @@ export function Users() {
     },
   });
 
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/users/${id}`),
+    onSuccess: () => {
+      setConfirmDelete(null);
+      done();
+    },
+    onError: (err) => {
+      // The refusal carries the counts. Showing it verbatim is the whole
+      // point: "cannot delete" says nothing, "21 services signed" says
+      // why the answer will not change.
+      setConfirmDelete(null);
+      setError(err instanceof ApiError ? err.message : "Could not delete this account.");
+    },
+  });
+
   const invite = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<Person>("/api/users", body),
     onSuccess: done,
@@ -130,6 +147,18 @@ export function Users() {
   });
 
   const engineers = (query.data?.rows ?? []).filter((r) => r.role === "ENGINEER" && r.isActive);
+
+  /*
+   * People who have left are kept, not hidden away and forgotten: the
+   * record still points at them, and a name that resolves to nothing is
+   * worse than a name marked closed. But they are no longer the roster,
+   * so they sit behind a count rather than between the colleagues
+   * somebody actually came here to find.
+   */
+  const all = query.data?.rows ?? [];
+  const current = all.filter((r) => r.isActive);
+  const former = all.filter((r) => !r.isActive);
+  const shown = showFormer ? [...current, ...former] : current;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -201,7 +230,7 @@ export function Users() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {query.data.rows.map((person) =>
+                {shown.map((person) =>
                   editing === person.id ? (
                     <EditRow
                       key={person.id}
@@ -240,16 +269,47 @@ export function Users() {
                         )}
                       </td>
                       <td className="px-4 py-2.5">
-                        <button
-                          onClick={() => {
-                            setEditing(person.id);
-                            setError("");
-                            setLeaving(null);
-                          }}
-                          className="flex cursor-pointer items-center gap-1.5 text-xs text-brand-700 transition hover:text-brand-900"
-                        >
-                          <Pencil size={13} /> Edit
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => {
+                              setEditing(person.id);
+                              setError("");
+                              setLeaving(null);
+                              setConfirmDelete(null);
+                            }}
+                            className="flex cursor-pointer items-center gap-1.5 text-xs text-brand-700 transition hover:text-brand-900"
+                          >
+                            <Pencil size={13} /> Edit
+                          </button>
+
+                          {/*
+                            Only on a closed account, and only ever as a
+                            second press. The server refuses an active
+                            one anyway; offering it here would be a
+                            button whose whole purpose is to be refused.
+                          */}
+                          {!person.isActive &&
+                            person.id !== user?.id &&
+                            (confirmDelete === person.id ? (
+                              <button
+                                onClick={() => remove.mutate(person.id)}
+                                disabled={remove.isPending}
+                                className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-rose-700 transition hover:text-rose-900"
+                              >
+                                <Trash2 size={13} /> Confirm
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setConfirmDelete(person.id);
+                                  setError("");
+                                }}
+                                className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-400 transition hover:text-rose-700"
+                              >
+                                <Trash2 size={13} /> Delete
+                              </button>
+                            ))}
+                        </div>
                       </td>
                     </tr>
                   )
@@ -257,6 +317,27 @@ export function Users() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {/*
+          Below the roster rather than above it, and closed by default.
+          Somebody opening this page is looking for a colleague who works
+          here; people who have left are a different question, asked less
+          often, and they should not be the first thing read.
+
+          Absent entirely when nobody has left, because a control that
+          reveals nothing still has to be understood before it can be
+          ignored.
+        */}
+        {former.length > 0 && (
+          <button
+            onClick={() => setShowFormer((v) => !v)}
+            className="flex w-full cursor-pointer items-center justify-center gap-1.5 border-t border-slate-100 px-4 py-2.5 text-xs text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+          >
+            {showFormer ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {showFormer ? "Hide" : "Show"} {former.length} former{" "}
+            {former.length === 1 ? "colleague" : "colleagues"}
+          </button>
         )}
       </Card>
     </div>

@@ -73,6 +73,46 @@ async function liveWork(userId: string) {
   return { devices, alerts, workOrders, total: devices + alerts + workOrders };
 }
 
+/**
+ * What the record would lose if this account were erased.
+ *
+ * Different from liveWork, which asks whether somebody can leave today.
+ * This asks whether they can be forgotten, and the answer is almost
+ * always no: an engineer who signed a service is part of that device's
+ * history for as long as the device exists, and a hospital that cannot
+ * say who worked on a ventilator has a maintenance record worth
+ * nothing.
+ *
+ * The database enforces this already — these relations are required and
+ * do not cascade, so the delete fails on a foreign key. Counting first
+ * turns that into an answer with numbers in it rather than a 500 and a
+ * constraint name.
+ *
+ * Sessions, reset tokens, notifications and saved views are absent on
+ * purpose. They cascade, and none of them is a record of anything: they
+ * are what the account was doing, not what the person did.
+ */
+async function historyOf(userId: string) {
+  const [services, alerts, workOrders, notes, devices, actions] = await Promise.all([
+    prisma.maintenanceRecord.count({ where: { engineerId: userId } }),
+    prisma.alert.count({ where: { raisedById: userId } }),
+    prisma.workOrder.count({ where: { engineerId: userId } }),
+    prisma.note.count({ where: { authorId: userId } }),
+    prisma.equipment.count({ where: { engineerId: userId } }),
+    prisma.auditLog.count({ where: { actorId: userId } }),
+  ]);
+
+  return {
+    services,
+    alerts,
+    workOrders,
+    notes,
+    devices,
+    actions,
+    total: services + alerts + workOrders + notes + devices + actions,
+  };
+}
+
 const createSchema = z
   .object({
     email: z.email().max(254).trim().toLowerCase(),
@@ -439,4 +479,85 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
     }
     throw err;
   }
+});
+
+/**
+ * Erase an account that never became part of the record.
+ *
+ * Deactivating is the normal end of a working relationship, and it is
+ * what the People page does: the person stops receiving mail and stops
+ * being able to sign in, and everything they did stays attached to their
+ * name. That is the right default, and it is why this refuses anybody
+ * with history rather than offering to cascade.
+ *
+ * What it is for is the other case: an address typed wrongly, a
+ * colleague invited who never arrived, a duplicate. Those accounts are
+ * not history, they are clutter, and keeping them forever only makes the
+ * list harder to read.
+ *
+ * Deactivate first, always. Two steps rather than one, because the
+ * button that ends somebody's access and the button that erases them
+ * should not be adjacent, and because an active account with no history
+ * is usually somebody who started yesterday.
+ */
+usersRouter.delete("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, res) => {
+  const id = z.uuid().safeParse(req.params.id);
+  if (!id.success) return res.status(404).json({ error: "User not found." });
+
+  const target = await prisma.user.findUnique({
+    where: { id: id.data },
+    select: { ...PUBLIC_FIELDS, departmentId: true },
+  });
+  if (!target) return res.status(404).json({ error: "User not found." });
+
+  const actor = req.user!;
+
+  // The same escalation the patch route closes: a manager who could
+  // delete an administrator could delete every administrator.
+  if (actor.role !== "ADMIN" && target.role === "ADMIN") {
+    return res.status(403).json({ error: "Only an administrator can manage administrators." });
+  }
+
+  if (target.id === actor.id) {
+    return res.status(409).json({ error: "You cannot delete your own account." });
+  }
+
+  if (target.isActive) {
+    return res.status(409).json({
+      error: "Deactivate the account first. Only a closed account can be deleted.",
+    });
+  }
+
+  const history = await historyOf(target.id);
+  if (history.total > 0) {
+    const parts = [
+      history.services && `${history.services} service${history.services === 1 ? "" : "s"} signed`,
+      history.workOrders && `${history.workOrders} repair${history.workOrders === 1 ? "" : "s"}`,
+      history.alerts && `${history.alerts} fault${history.alerts === 1 ? "" : "s"} reported`,
+      history.notes && `${history.notes} note${history.notes === 1 ? "" : "s"}`,
+      history.devices && `${history.devices} device${history.devices === 1 ? "" : "s"}`,
+      history.actions && `${history.actions} recorded action${history.actions === 1 ? "" : "s"}`,
+    ].filter(Boolean);
+
+    return res.status(409).json({
+      error:
+        `This account is part of the record: ${parts.join(", ")}. ` +
+        `It stays closed rather than deleted, so the history keeps their name.`,
+      history,
+    });
+  }
+
+  // Audited before the row goes, because afterwards there is nothing to
+  // describe and the actorId would be the only thing left pointing at it.
+  await recordAudit({
+    actorId: actor.id,
+    action: "user.deleted",
+    entity: "User",
+    entityId: target.id,
+    before: target,
+  });
+
+  await prisma.user.delete({ where: { id: target.id } });
+
+  res.status(204).end();
 });
