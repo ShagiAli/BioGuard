@@ -115,20 +115,44 @@ async function historyOf(userId: string) {
 }
 
 /**
- * Roles a manager may not grant, edit or remove.
+ * Roles a manager may not grant, edit or remove: their own, and the one
+ * above it.
  *
- * Administrators were the only protected role, which closed one version
- * of the attack and left its twin open. The review step exists so that a
- * repair is signed by one person and accepted by another; a manager who
- * could make somebody a head of engineering, or quietly take over the one
- * who exists, could be both. So the reviewer is protected the way an
- * administrator is, and for the same reason.
+ * A manager runs the team — adds people, corrects them, moves them
+ * between roles — but does not create their peers or their superiors. If
+ * they could, the difference between a manager and an administrator
+ * would be a formality any manager could remove, and a manager could
+ * demote or close every other manager's account.
+ *
+ * Head of engineering was on this list briefly, after a security review,
+ * and was taken off by decision. The concern it answered is real: a
+ * manager who can grant that role can create a reviewer on an inbox of
+ * their own and accept repairs through it. It was judged worth allowing
+ * so that managers can appoint the head they answer to. What still
+ * stands is narrower but matters more: a manager cannot redirect an
+ * account somebody already uses, a changed address warns the old one,
+ * and nobody accepts their own repair.
  */
-const PROTECTED_FROM_MANAGERS: readonly Role[] = ["ADMIN", "HEAD_OF_ENGINEERING"];
+const PROTECTED_FROM_MANAGERS: readonly Role[] = ["ADMIN", "MANAGER"];
 
 const PROTECTED = {
-  error: "Only an administrator can manage administrators and heads of engineering.",
+  error: "Only an administrator can manage administrators and managers.",
 };
+
+/**
+ * The roles this person may hand out, which is also the set of people
+ * they may edit: a manager who could not assign a role could otherwise
+ * edit somebody into it, or out of it.
+ *
+ * Sent to the page with the list rather than decided again there. The
+ * rule has already drifted between two hand-kept copies once in this
+ * module, and a dropdown offering a choice the server then refuses is a
+ * worse form than one that does not offer it.
+ */
+function assignableRoles(actorRole: Role): Role[] {
+  const all = Object.values(Role);
+  return actorRole === "ADMIN" ? all : all.filter((r) => !PROTECTED_FROM_MANAGERS.includes(r));
+}
 
 function managerOverreach(actorRole: Role, ...roles: (Role | undefined)[]): boolean {
   return actorRole !== "ADMIN" && roles.some((r) => r && PROTECTED_FROM_MANAGERS.includes(r));
@@ -198,9 +222,9 @@ const updateSchema = z
  */
 const ORDER: Prisma.UserOrderByWithRelationInput[] = [{ role: "asc" }, { fullName: "asc" }];
 
-usersRouter.get("/", requireAuth, requireRole("ADMIN", "MANAGER"), async (_req, res) => {
+usersRouter.get("/", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, res) => {
   const rows = await prisma.user.findMany({ select: PUBLIC_FIELDS, orderBy: ORDER });
-  res.json({ rows });
+  res.json({ rows, assignableRoles: assignableRoles(req.user!.role) });
 });
 
 /**
@@ -391,7 +415,17 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
    * manager who could become the reviewer could accept a repair signed in
    * somebody else's name.
    */
-  if (managerOverreach(actor.role, target.role, changes.role)) {
+  /*
+   * About other people's accounts, not your own. Protecting the manager
+   * role from managers also caught a manager editing themselves, so one
+   * could not correct a typo in their own name — and was told only an
+   * administrator could "manage managers", when the real answer to the
+   * dangerous edits is the more specific one below. Your own role is
+   * still checked against what you are asking for, so no manager can
+   * make themselves an administrator.
+   */
+  const editingSelf = target.id === actor.id;
+  if (managerOverreach(actor.role, editingSelf ? undefined : target.role, changes.role)) {
     return res.status(403).json(PROTECTED);
   }
 
@@ -651,7 +685,8 @@ usersRouter.delete("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (
 
   // The same protection the patch route applies: a manager who could
   // delete the protected roles could clear the way to grant them.
-  if (managerOverreach(actor.role, target.role)) {
+  // Deleting yourself has its own, clearer refusal just below.
+  if (target.id !== actor.id && managerOverreach(actor.role, target.role)) {
     return res.status(403).json(PROTECTED);
   }
 

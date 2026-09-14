@@ -76,7 +76,7 @@ export function Users() {
 
   const query = useQuery({
     queryKey: ["users"],
-    queryFn: () => api.get<{ rows: Person[] }>("/api/users"),
+    queryFn: () => api.get<{ rows: Person[]; assignableRoles: Role[] }>("/api/users"),
   });
 
   // Departments come from the form's options endpoint, which is gated to
@@ -155,6 +155,15 @@ export function Users() {
    * so they sit behind a count rather than between the colleagues
    * somebody actually came here to find.
    */
+  /*
+   * Decided by the server and read here, never worked out a second time.
+   * Also answers which rows this person may edit: somebody who cannot
+   * assign a role cannot be allowed to edit a person holding it, or they
+   * could edit that person out of it.
+   */
+  const assignable = query.data?.assignableRoles ?? [];
+  const mayManage = (role: Role) => assignable.includes(role);
+
   const all = query.data?.rows ?? [];
   const current = all.filter((r) => r.isActive);
   const former = all.filter((r) => !r.isActive);
@@ -201,6 +210,7 @@ export function Users() {
 
       {adding && (
         <AddPerson
+          roles={assignable}
           departments={options.data?.departments ?? []}
           busy={invite.isPending}
           onCancel={() => {
@@ -233,6 +243,7 @@ export function Users() {
                 {shown.map((person) =>
                   editing === person.id ? (
                     <EditRow
+                      roles={assignable}
                       key={person.id}
                       person={person}
                       departments={options.data?.departments ?? []}
@@ -270,17 +281,19 @@ export function Users() {
                       </td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => {
-                              setEditing(person.id);
-                              setError("");
-                              setLeaving(null);
-                              setConfirmDelete(null);
-                            }}
-                            className="flex cursor-pointer items-center gap-1.5 text-xs text-brand-700 transition hover:text-brand-900"
-                          >
-                            <Pencil size={13} /> Edit
-                          </button>
+                          {mayManage(person.role) && (
+                            <button
+                              onClick={() => {
+                                setEditing(person.id);
+                                setError("");
+                                setLeaving(null);
+                                setConfirmDelete(null);
+                              }}
+                              className="flex cursor-pointer items-center gap-1.5 text-xs text-brand-700 transition hover:text-brand-900"
+                            >
+                              <Pencil size={13} /> Edit
+                            </button>
+                          )}
 
                           {/*
                             Only on a closed account, and only ever as a
@@ -290,6 +303,7 @@ export function Users() {
                           */}
                           {!person.isActive &&
                             person.id !== user?.id &&
+                            mayManage(person.role) &&
                             (confirmDelete === person.id ? (
                               <button
                                 onClick={() => remove.mutate(person.id)}
@@ -406,11 +420,13 @@ function Handover({
 }
 
 function AddPerson({
+  roles,
   departments,
   busy,
   onCancel,
   onSubmit,
 }: {
+  roles: Role[];
   departments: Department[];
   busy: boolean;
   onCancel: () => void;
@@ -453,7 +469,7 @@ function AddPerson({
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
           >
-            {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+            {roles.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABELS[r]}
               </option>
@@ -493,12 +509,14 @@ function AddPerson({
 }
 
 function EditRow({
+  roles,
   person,
   departments,
   busy,
   onCancel,
   onSave,
 }: {
+  roles: Role[];
   person: Person;
   departments: Department[];
   busy: boolean;
@@ -528,7 +546,7 @@ function EditRow({
       </td>
       <td className={cell}>
         <select className={INPUT} value={role} onChange={(e) => setRole(e.target.value as Role)}>
-          {(Object.keys(ROLE_LABELS) as Role[]).map((r) => (
+          {roles.map((r) => (
             <option key={r} value={r}>
               {ROLE_LABELS[r]}
             </option>

@@ -2206,35 +2206,89 @@ describe("managing people", () => {
     expect(roleMail).toBe(0);
   });
 
-  it("keeps the head of engineering away from managers, as administrators are", async () => {
+  it("lets a manager run the team but not create managers or administrators", async () => {
     const { cookie } = await aManager();
-    const head = await someoneInUse("HEAD_OF_ENGINEERING", "head");
 
-    // Cannot make one — a manager who could would be the reviewer.
-    await request(app)
-      .post("/api/users")
-      .set("Cookie", cookie)
-      .send({
-        email: "second.inbox@hospital.test",
-        fullName: "Also Me",
-        role: "HEAD_OF_ENGINEERING",
-      })
-      .expect(403);
+    /*
+     * The rule by decision: a manager adds, edits and moves people between
+     * roles, but does not make their peers or their superiors. Otherwise
+     * the difference between a manager and an administrator is a setting
+     * any manager could change, and one manager could demote the rest.
+     */
+    for (const role of ["ADMIN", "MANAGER"] as const) {
+      await request(app)
+        .post("/api/users")
+        .set("Cookie", cookie)
+        .send({ email: `made.${role.toLowerCase()}@hospital.test`, fullName: "Nope", role })
+        .expect(403);
+    }
 
-    // Cannot edit the one there is, including taking the address.
-    await request(app)
-      .patch(`/api/users/${head.id}`)
-      .set("Cookie", cookie)
-      .send({ fullName: "Renamed" })
-      .expect(403);
-
-    // Cannot turn an engineer into one either.
+    // Cannot promote somebody into either.
     const engineer = await someoneInUse("ENGINEER", "promote");
+    for (const role of ["ADMIN", "MANAGER"] as const) {
+      await request(app)
+        .patch(`/api/users/${engineer.id}`)
+        .set("Cookie", cookie)
+        .send({ role })
+        .expect(403);
+    }
+
+    // Cannot edit another manager, which would let one demote the rest.
+    const peer = await prisma.user.create({
+      data: {
+        email: `peer.manager.${Date.now()}@hospital.test`,
+        passwordHash: await hashPassword(PASSWORD),
+        fullName: "Peer Manager",
+        role: "MANAGER",
+      },
+    });
+    await request(app)
+      .patch(`/api/users/${peer.id}`)
+      .set("Cookie", cookie)
+      .send({ fullName: "Demoted" })
+      .expect(403);
+
+    /*
+     * But everything below that is theirs, including the head of
+     * engineering — a choice made knowing it lets a manager create a
+     * reviewer. The protections that remain are tested separately:
+     * no redirecting an account in use, and no reviewing your own work.
+     */
     await request(app)
       .patch(`/api/users/${engineer.id}`)
       .set("Cookie", cookie)
       .send({ role: "HEAD_OF_ENGINEERING" })
-      .expect(403);
+      .expect(200);
+
+    await request(app)
+      .post("/api/users")
+      .set("Cookie", cookie)
+      .send({
+        email: `new.alerts.${Date.now()}@hospital.test`,
+        fullName: "New Triage",
+        role: "HEAD_OF_ALERTS",
+      })
+      .expect(201);
+  });
+
+  it("tells each person which roles they may hand out", async () => {
+    /*
+     * The page builds its role pickers from this, rather than keeping its
+     * own copy of the rule — so a manager is never offered a choice the
+     * server would then refuse.
+     */
+    const { cookie } = await aManager();
+    const asManager = await request(app).get("/api/users").set("Cookie", cookie).expect(200);
+    expect(asManager.body.assignableRoles).not.toContain("ADMIN");
+    expect(asManager.body.assignableRoles).not.toContain("MANAGER");
+    expect(asManager.body.assignableRoles).toContain("HEAD_OF_ENGINEERING");
+    expect(asManager.body.assignableRoles).toContain("ENGINEER");
+
+    const asAdmin = await request(app)
+      .get("/api/users")
+      .set("Cookie", await login(seeded.adminEmail))
+      .expect(200);
+    expect([...asAdmin.body.assignableRoles].sort()).toEqual([...Object.values(Role)].sort());
   });
 
   it("refuses a manager the administrators", async () => {
@@ -2281,6 +2335,24 @@ describe("managing people", () => {
       .set("Cookie", cookie)
       .send({ role: "STAFF" })
       .expect(409);
+
+    // Nor into a role above their own.
+    await request(app)
+      .patch(`/api/users/${manager.id}`)
+      .set("Cookie", cookie)
+      .send({ role: "ADMIN" })
+      .expect(403);
+
+    /*
+     * But a manager can still fix their own name. Protecting the manager
+     * role from managers briefly caught this too, which is how it came to
+     * be tested.
+     */
+    await request(app)
+      .patch(`/api/users/${manager.id}`)
+      .set("Cookie", cookie)
+      .send({ fullName: "People Manager" })
+      .expect(200);
   });
 
   it("refuses an address another account already uses", async () => {
