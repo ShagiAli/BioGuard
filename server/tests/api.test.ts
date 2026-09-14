@@ -2142,6 +2142,70 @@ describe("managing people", () => {
     expect(notice.body).toContain("@hospital.test");
   });
 
+  it("tells a person when their role changes, and what the new one means", async () => {
+    const admin = await login(seeded.adminEmail);
+    const person = await someoneInUse("ENGINEER", "promoted");
+    await prisma.sentEmail.deleteMany();
+
+    await request(app)
+      .patch(`/api/users/${person.id}`)
+      .set("Cookie", admin)
+      .send({ role: "HEAD_OF_ENGINEERING" })
+      .expect(200);
+
+    const notice = await prisma.sentEmail.findFirstOrThrow({
+      where: { to: person.email, subject: "Your BioGuard role has changed" },
+    });
+
+    // Both roles by name, not by the enum a person never sees.
+    expect(notice.body).toContain("from Engineer to Head of engineering");
+
+    /*
+     * And what it means. "Head of engineering" alone does not tell
+     * somebody they now hold the button that returns a device to a ward.
+     */
+    expect(notice.body).toContain("accept them");
+
+    // Who did it is the first thing anybody asks about their own account.
+    expect(notice.body).toContain("The change was made by Admin.");
+  });
+
+  it("says nothing about roles when the role did not change", async () => {
+    const admin = await login(seeded.adminEmail);
+    const person = await someoneInUse("ENGINEER", "renamed");
+    await prisma.sentEmail.deleteMany();
+
+    // A different name, and the same role sent back unchanged — which is
+    // what the edit form does when only the name was touched.
+    await request(app)
+      .patch(`/api/users/${person.id}`)
+      .set("Cookie", admin)
+      .send({ fullName: "Somebody Renamed", role: "ENGINEER" })
+      .expect(200);
+
+    const roleMail = await prisma.sentEmail.count({
+      where: { subject: "Your BioGuard role has changed" },
+    });
+    expect(roleMail).toBe(0);
+  });
+
+  it("does not describe a new job to somebody who is leaving", async () => {
+    const admin = await login(seeded.adminEmail);
+    const person = await someoneInUse("ENGINEER", "leaving");
+    await prisma.sentEmail.deleteMany();
+
+    await request(app)
+      .patch(`/api/users/${person.id}`)
+      .set("Cookie", admin)
+      .send({ role: "STAFF", isActive: false })
+      .expect(200);
+
+    const roleMail = await prisma.sentEmail.count({
+      where: { to: person.email, subject: "Your BioGuard role has changed" },
+    });
+    expect(roleMail).toBe(0);
+  });
+
   it("keeps the head of engineering away from managers, as administrators are", async () => {
     const { cookie } = await aManager();
     const head = await someoneInUse("HEAD_OF_ENGINEERING", "head");

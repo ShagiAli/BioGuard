@@ -20,6 +20,7 @@ import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { recordAudit } from "../../lib/audit.js";
 import { generateToken, hashPassword, hashToken } from "../../lib/security.js";
 import { sendMail } from "../../lib/email.js";
+import { ROLE_LABELS, ROLE_MEANING } from "../../lib/roles.js";
 import { env } from "../../env.js";
 
 export const usersRouter = Router();
@@ -521,13 +522,7 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
 
     if (invite) {
       /*
-       * Worded for someone who may already have a password and someone
-       * who never had one, because the record cannot tell them apart:
-       * passwordChangedAt is set at creation, so "never set" and "set
-       * on the first day" look identical.
-       */
-      /*
-       * And tell the address it used to be.
+       * Tell the address it used to be.
        *
        * Only for an account in use. A takeover that locks somebody out
        * with no word to the inbox they actually read looks, from their
@@ -550,6 +545,12 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
         });
       }
 
+      /*
+       * Worded for someone who may already have a password and someone
+       * who never had one, because the record cannot tell them apart:
+       * passwordChangedAt is set at creation, so "never set" and "set
+       * on the first day" look identical.
+       */
       await sendMail({
         to: updated.email,
         subject: "Your BioGuard sign-in address has changed",
@@ -559,6 +560,41 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
           `yet, or you need a new one, follow this link within 7 days:\n\n` +
           `${env.APP_URL}/reset-password?token=${invite}\n\n` +
           `Any link sent to your previous address has stopped working.`,
+      });
+    }
+
+    /*
+     * Tell somebody when what they are allowed to do has changed.
+     *
+     * A role decides what the application shows a person, what it lets
+     * them do and what it writes to them about, so changing one silently
+     * is changing their job without saying so. The first they would know
+     * is a page missing from the sidebar, or reminders that stopped — or
+     * worse, a button they now hold that nobody mentioned, like the one
+     * that returns a device to a ward.
+     *
+     * Says what the new role means rather than only its name, because
+     * "Head of engineering" tells nobody that they now accept repairs.
+     * And says who made the change, which is the first question anybody
+     * asks about a change to their own account.
+     *
+     * To the address as it stands after this edit, in case it changed in
+     * the same save. Not to somebody who has just been deactivated: a
+     * person leaving does not need to be told what their new job is.
+     */
+    if (changes.role && changes.role !== target.role && updated.isActive) {
+      const from = ROLE_LABELS[target.role];
+      const to = ROLE_LABELS[changes.role];
+
+      await sendMail({
+        to: updated.email,
+        subject: "Your BioGuard role has changed",
+        text:
+          `Your role in BioGuard has changed from ${from} to ${to}. ` +
+          `The change was made by ${actor.fullName}.\n\n` +
+          `As ${to}, ${ROLE_MEANING[changes.role]}\n\n` +
+          `It takes effect straight away. If you have BioGuard open, reload the page to see it.\n\n` +
+          `Open BioGuard: ${env.APP_URL}`,
       });
     }
 
