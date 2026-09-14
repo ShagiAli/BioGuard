@@ -390,6 +390,7 @@ export function WorkOrderDetail() {
         <CloseDialog
           busy={close.isPending}
           engineerName={wo.engineer.fullName}
+          repairActions={wo.repairActions}
           onCancel={() => setClosing(false)}
           onConfirm={(body) => close.mutate(body)}
         />
@@ -503,24 +504,22 @@ function TextArea({
 function CloseDialog({
   busy,
   engineerName,
+  repairActions,
   onCancel,
   onConfirm,
 }: {
   busy: boolean;
   engineerName: string;
+  repairActions: string | null;
   onCancel: () => void;
   onConfirm: (body: Record<string, unknown>) => void;
 }) {
-  const [repairActions, setRepairActions] = useState("");
   const [finalResolution, setFinalResolution] = useState("");
-  const [cost, setCost] = useState("");
-  const [downtimeHours, setDowntimeHours] = useState("0");
-  const [labourHours, setLabourHours] = useState("");
   const [engineerFeedback, setEngineerFeedback] = useState("");
   const [reviewChecks, setReviewChecks] = useState("");
   const [watchFor, setWatchFor] = useState("");
 
-  const ready = repairActions.trim() && finalResolution.trim();
+  const ready = finalResolution.trim() && repairActions?.trim();
 
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-auto bg-slate-900/40 p-4">
@@ -533,18 +532,26 @@ function CloseDialog({
         </header>
 
         <div className="space-y-3 p-4">
-          <label className="block">
-            <span className="text-xs uppercase tracking-wide text-slate-500">
-              Repair carried out
-            </span>
-            <textarea
-              rows={3}
-              value={repairActions}
-              onChange={(e) => setRepairActions(e.target.value)}
-              placeholder="Parts replaced, adjustments made, tests performed"
-              className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm outline-none focus:border-teal-500"
-            />
-          </label>
+          {/*
+            Shown, not asked for. This is the engineer's account of their
+            own repair and they wrote it on the work order; asking again
+            put the question to somebody who did not do the work, and the
+            answer overwrote theirs.
+          */}
+          <div className="rounded-md bg-slate-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              {engineerName} recorded
+            </p>
+            {repairActions?.trim() ? (
+              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                {repairActions}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-rose-700">
+                Nothing yet. They need to fill in Repair actions before this can be closed.
+              </p>
+            )}
+          </div>
 
           <label className="block">
             <span className="text-xs uppercase tracking-wide text-slate-500">Final resolution</span>
@@ -555,56 +562,18 @@ function CloseDialog({
               placeholder="Outcome, and anything the ward should know"
               className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm outline-none focus:border-teal-500"
             />
+            {/* The ward reported the fault and is told when it is fixed,
+                so this sentence is the reviewer's rather than the
+                engineer's. */}
+            <span className="mt-1 block text-xs text-slate-400">
+              Sent to whoever reported the fault.
+            </span>
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs uppercase tracking-wide text-slate-500">Cost ($)</span>
-              <input
-                type="number"
-                min="0"
-                value={cost}
-                onChange={(e) => setCost(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 font-mono text-sm"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs uppercase tracking-wide text-slate-500">
-                Downtime (hours)
-              </span>
-              <input
-                type="number"
-                min="0"
-                value={downtimeHours}
-                onChange={(e) => setDowntimeHours(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 font-mono text-sm"
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs uppercase tracking-wide text-slate-500">Labour (hours)</span>
-              <input
-                type="number"
-                min="0"
-                step="0.25"
-                value={labourHours}
-                onChange={(e) => setLabourHours(e.target.value)}
-                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 font-mono text-sm"
-              />
-              {/* Not the same as downtime: an hour of work can sit inside
-                  three weeks of waiting for a part. */}
-              <span className="mt-1 block text-xs text-slate-400">
-                Engineer time, not downtime.
-              </span>
-            </label>
-          </div>
-
           {/*
-            The reviewer's own additions, all optional and kept apart
-            from the repair itself — the fields above are the engineer's
-            account of what they did, and these are somebody else's
-            reading of it. Optional on purpose: a repair that was simply
-            correct should not need three paragraphs about it, and a
-            required box only teaches people to type "fine".
+            Optional on purpose: a repair that was simply correct should
+            not need three paragraphs about it, and a required box only
+            teaches people to type "fine".
           */}
           <div className="space-y-3 border-t border-slate-100 pt-3">
             <p className="text-xs uppercase tracking-wide text-slate-400">Your review — optional</p>
@@ -661,11 +630,7 @@ function CloseDialog({
             disabled={!ready || busy}
             onClick={() =>
               onConfirm({
-                repairActions,
                 finalResolution,
-                ...(cost ? { cost: Number(cost) } : {}),
-                ...(labourHours ? { labourHours: Number(labourHours) } : {}),
-                downtimeHours: Number(downtimeHours) || 0,
                 ...(engineerFeedback.trim() ? { engineerFeedback: engineerFeedback.trim() } : {}),
                 ...(reviewChecks.trim() ? { reviewChecks: reviewChecks.trim() } : {}),
                 ...(watchFor.trim() ? { watchFor: watchFor.trim() } : {}),

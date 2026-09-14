@@ -437,7 +437,20 @@ workOrdersRouter.post("/:id/notes", requireAuth, async (req, res) => {
 
 const closeSchema = z
   .object({
-    repairActions: z.string().min(1, "Describe the repair.").max(4000),
+    /**
+     * The engineer's account of the repair, and theirs to write.
+     *
+     * Required here while engineers closed their own work orders, which
+     * made it a sensible last prompt. Closing is the reviewer's move
+     * now, so asking for it again asked the wrong person — and worse,
+     * overwrote what the engineer had already typed on the work order
+     * with a second-hand description of work they did not do.
+     *
+     * Still accepted, because an administrator amending a closed record
+     * has to be able to correct it. Omitted, what the engineer wrote
+     * stands.
+     */
+    repairActions: z.string().min(1).max(4000).optional(),
     finalResolution: z.string().min(1, "Record the outcome.").max(2000),
     cost: z.coerce.number().min(0).max(10_000_000).optional(),
     downtimeHours: z.coerce.number().int().min(0).max(10_000).default(0),
@@ -635,6 +648,23 @@ workOrdersRouter.post(
     const parts = partsSettled(before.parts.map((part) => part.status));
     if (!parts.ok) return res.status(409).json({ error: parts.reason });
 
+    /*
+     * Something has to be written about what was done.
+     *
+     * The engineer normally writes it on the work order long before this
+     * point, which is why it is no longer asked for here. But a repair
+     * closed with neither their account nor a correction would enter the
+     * device's permanent history as a blank line, and a maintenance
+     * record that cannot say what was done is worse than no record: it
+     * looks like evidence.
+     */
+    const account = parsed.data.repairActions ?? before.repairActions;
+    if (!account || !account.trim()) {
+      return res.status(409).json({
+        error: "The engineer has not recorded what they did. Ask them to fill in Repair actions.",
+      });
+    }
+
     const closedAt = new Date();
 
     const closed = await prisma.$transaction(async (tx) => {
@@ -659,7 +689,7 @@ workOrdersRouter.post(
           engineerId: before.engineerId,
           problem: before.alert.description,
           findings: before.findings,
-          workPerformed: parsed.data.repairActions,
+          workPerformed: account,
           cost: parsed.data.cost ?? null,
           downtimeHours: parsed.data.downtimeHours,
         },
@@ -669,7 +699,7 @@ workOrdersRouter.post(
         where: { id: before.id },
         data: {
           status: "CLOSED",
-          repairActions: parsed.data.repairActions,
+          repairActions: account,
           finalResolution: parsed.data.finalResolution,
           labourHours: parsed.data.labourHours ?? null,
           engineerFeedback: parsed.data.engineerFeedback || null,

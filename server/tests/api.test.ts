@@ -1196,6 +1196,60 @@ describe("work orders", () => {
     expect(accepted).toBe(0);
   });
 
+  it("keeps the engineer's account of the repair when it is accepted", async () => {
+    const alert = await assignedAlert();
+    const engineer = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", engineer)
+      .send({ alertId: alert.id })
+      .expect(201);
+
+    const theirs = "Replaced the expiratory flow sensor assembly and reran the self-test.";
+    await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", engineer)
+      .send({ repairActions: theirs, status: "COMPLETED" })
+      .expect(200);
+
+    /*
+     * The reviewer closes without sending repairActions, because they
+     * are no longer asked for it. What the engineer wrote has to survive
+     * that and reach the device's permanent history — it used to be
+     * overwritten by whatever the closer typed into a box.
+     */
+    const closed = await request(app)
+      .post(`/api/work-orders/${wo.body.id}/close`)
+      .set("Cookie", await login(seeded.reviewerEmail))
+      .send({ finalResolution: "Back in service." })
+      .expect(200);
+
+    expect(closed.body.repairActions).toBe(theirs);
+
+    const record = await prisma.maintenanceRecord.findFirstOrThrow({
+      where: { equipmentId: seeded.ownDeviceId },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(record.workPerformed).toBe(theirs);
+  });
+
+  it("will not close a repair nobody has described", async () => {
+    const { id } = await awaitingReview();
+
+    /*
+     * A maintenance record that cannot say what was done is worse than
+     * no record: it looks like evidence. The refusal names who has to
+     * act, since the reviewer cannot write this themselves.
+     */
+    const refused = await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", await login(seeded.reviewerEmail))
+      .send({ finalResolution: "Back in service." })
+      .expect(409);
+
+    expect(refused.body.error).toContain("Repair actions");
+  });
+
   it("refuses to close before the work is marked complete", async () => {
     const alert = await assignedAlert();
     const cookie = await login(seeded.engineerEmail);
