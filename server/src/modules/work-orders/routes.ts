@@ -507,6 +507,31 @@ function mayReview(user: { role: string }): boolean {
   return user.role === "ADMIN" || user.role === "HEAD_OF_ENGINEERING";
 }
 
+/**
+ * Nobody reviews their own repair.
+ *
+ * mayReview decided by role and nothing else, so a person who could
+ * review could review anything — including work they had done. That is
+ * reachable two ordinary ways: an administrator who opens a work order
+ * becomes its engineer, and an engineer promoted to head of engineering
+ * keeps whatever they were already working on. Either could complete a
+ * repair and then accept it, and the gate whose whole purpose is a
+ * second pair of eyes would record one person twice.
+ *
+ * Checked on the work order's engineer, not on who raised the alert or
+ * last touched it: the engineer is who signs for the repair, so they are
+ * who the second person has to be different from. An administrator who
+ * genuinely needs it closed can reassign the engineer first, which
+ * leaves that decision in the audit log rather than inside a bypass.
+ */
+function reviewingOwnWork(user: { id: string }, workOrder: { engineerId: string }): boolean {
+  return user.id === workOrder.engineerId;
+}
+
+const OWN_WORK = {
+  error: "You cannot review your own repair. Another reviewer has to accept or send it back.",
+};
+
 const REVIEW_ONLY = {
   error: "Only the head of engineering can accept or send back a repair.",
 };
@@ -544,6 +569,10 @@ workOrdersRouter.post(
 
     if (!mayReview(req.user!)) {
       return res.status(403).json(REVIEW_ONLY);
+    }
+
+    if (reviewingOwnWork(req.user!, before)) {
+      return res.status(403).json(OWN_WORK);
     }
 
     // Only finished work can be sent back. Anything else is already open.
@@ -641,6 +670,10 @@ workOrdersRouter.post(
 
     if (!mayReview(req.user!)) {
       return res.status(403).json(REVIEW_ONLY);
+    }
+
+    if (reviewingOwnWork(req.user!, before)) {
+      return res.status(403).json(OWN_WORK);
     }
 
     if (before.status === "CLOSED") {

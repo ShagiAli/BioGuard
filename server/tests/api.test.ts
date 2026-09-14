@@ -15,6 +15,7 @@ import request from "supertest";
 import type { Express } from "express";
 import { Role } from "@prisma/client";
 import { prisma } from "../src/lib/prisma.js";
+import { settled } from "../src/lib/afterResponse.js";
 import { hashPassword } from "../src/lib/security.js";
 import { assertTestDatabase } from "./assert-test-database.js";
 let app: Express;
@@ -61,6 +62,25 @@ async function login(email: string, password = PASSWORD): Promise<string[]> {
   const cookie = Array.isArray(raw) ? raw : [raw as string];
   sessions.set(email, cookie);
   return cookie;
+}
+
+/**
+ * A person of the given role who has signed in, so their account is in use.
+ *
+ * Its own row every time, never the seeded one. These tests exist to prove
+ * a refusal, and if the refusal ever regressed they would change whatever
+ * they were pointed at before failing — the seeded engineer's address or
+ * role, which half the suite looks people up by. One broken guard would
+ * then read as a dozen unrelated failures, with the real one lost among
+ * them.
+ */
+async function someoneInUse(role: "ENGINEER" | "HEAD_OF_ENGINEERING", tag: string) {
+  const email = `${tag}.${Date.now()}.${Math.floor(Math.random() * 1e6)}@hospital.test`;
+  const user = await prisma.user.create({
+    data: { email, passwordHash: await hashPassword(PASSWORD), fullName: `In Use ${tag}`, role },
+  });
+  await login(email);
+  return user;
 }
 
 async function aManager() {
@@ -267,6 +287,8 @@ describe("authentication", () => {
   });
 
   it("does not reveal whether an email exists on password reset", async () => {
+    await prisma.sentEmail.deleteMany();
+
     const known = await request(app)
       .post("/api/auth/forgot-password")
       .send({ email: seeded.engineerEmail })
@@ -277,6 +299,19 @@ describe("authentication", () => {
       .expect(200);
 
     expect(known.body).toEqual(unknown.body);
+
+    /*
+     * The work happens after the response now, so that nothing about the
+     * address can be timed. Answering first is only a fix if the work
+     * still happens — so wait for it, then check the registered address
+     * got its link and the unknown one produced nothing.
+     */
+    await settled();
+
+    const sent = await prisma.sentEmail.findMany({
+      where: { subject: "Reset your BioGuard password" },
+    });
+    expect(sent.map((m) => m.to)).toEqual([seeded.engineerEmail]);
   });
 });
 
@@ -1297,6 +1332,37 @@ describe("work orders", () => {
     expect(refused.body.error).toContain("Repair actions");
   });
 
+  it("will not let anybody accept or send back their own repair", async () => {
+    const { id } = await awaitingReview();
+
+    /*
+     * Make the reviewer the engineer, the way it happens in practice: an
+     * engineer promoted to head of engineering keeps the work they had.
+     * The gate exists so a second person looks at the device, and one
+     * person holding both ends of it is exactly what it must refuse.
+     */
+    const head = await prisma.user.findFirstOrThrow({ where: { email: seeded.reviewerEmail } });
+    await prisma.workOrder.update({ where: { id }, data: { engineerId: head.id } });
+
+    const cookie = await login(seeded.reviewerEmail);
+
+    const closing = await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", cookie)
+      .send({ finalResolution: "Back in service." })
+      .expect(403);
+    expect(closing.body.error).toContain("your own repair");
+
+    await request(app)
+      .post(`/api/work-orders/${id}/reject`)
+      .set("Cookie", cookie)
+      .send({ reason: "Marking my own homework." })
+      .expect(403);
+
+    const still = await prisma.workOrder.findUniqueOrThrow({ where: { id } });
+    expect(still.status).toBe("COMPLETED");
+  });
+
   it("refuses to close before the work is marked complete", async () => {
     const alert = await assignedAlert();
     const cookie = await login(seeded.engineerEmail);
@@ -2006,26 +2072,105 @@ describe("managing people", () => {
     expect(JSON.stringify(res.body)).not.toContain("$argon2");
   });
 
-  it("lets a manager correct an address, which is the point of the screen", async () => {
+  it("lets a manager correct the address on an invitation nobody has used", async () => {
     const { cookie } = await aManager();
-    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+
+    // Invited with a typo, which is what the screen is for.
+    const invited = await request(app)
+      .post("/api/users")
+      .set("Cookie", cookie)
+      .send({ email: "jmaes.carter@hospital.test", fullName: "James Carter II", role: "ENGINEER" })
+      .expect(201);
 
     const res = await request(app)
-      .patch(`/api/users/${engineer.id}`)
+      .patch(`/api/users/${invited.body.id}`)
       .set("Cookie", cookie)
-      .send({ email: "James.Carter@Hospital.NHS.uk" })
+      .send({ email: "James.Carter2@Hospital.test" })
       .expect(200);
 
     // Lowercased on the way in, or the login lookup would never match it.
-    expect(res.body.email).toBe("james.carter@hospital.nhs.uk");
+    expect(res.body.email).toBe("james.carter2@hospital.test");
+  });
 
-    // The person keeps their account: same row, same password.
+  it("will not let a manager redirect an account somebody uses", async () => {
+    const { cookie } = await aManager();
+
+    // Signed in, so their address is how they recover the account — and
+    // whoever sets it receives the next reset link.
+    const engineer = await someoneInUse("ENGINEER", "redirect");
+
+    /*
+     * This is the takeover. Point an engineer's address at your own inbox
+     * and the link to set their password arrives there; sign in as them
+     * and the maintenance records carry their name. It used to succeed.
+     */
+    const refused = await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", cookie)
+      .send({ email: "the.manager.again@hospital.test" })
+      .expect(403);
+
+    expect(refused.body.error).toContain("only an administrator");
+
+    const unchanged = await prisma.user.findUniqueOrThrow({ where: { id: engineer.id } });
+    expect(unchanged.email).toBe(engineer.email);
+  });
+
+  it("tells the old address when an administrator changes an account in use", async () => {
+    const admin = await login(seeded.adminEmail);
+    const engineer = await someoneInUse("ENGINEER", "notice");
+    await prisma.sentEmail.deleteMany();
+
     await request(app)
-      .post("/api/auth/login")
-      .send({ email: "james.carter@hospital.nhs.uk", password: PASSWORD })
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", admin)
+      .send({ email: "carter.new@hospital.test" })
       .expect(200);
 
-    await prisma.user.update({ where: { id: engineer.id }, data: { email: seeded.engineerEmail } });
+    /*
+     * Administrators can still do it, and must: people change addresses.
+     * But a change to an account in use is announced to the inbox its
+     * owner actually reads, so a takeover cannot pass as an unexplained
+     * sign-out.
+     */
+    const notice = await prisma.sentEmail.findFirstOrThrow({
+      where: { to: engineer.email, subject: "Your BioGuard sign-in address was changed" },
+    });
+
+    // Enough to recognise, not the whole new address.
+    expect(notice.body).not.toContain("carter.new@hospital.test");
+    expect(notice.body).toContain("@hospital.test");
+  });
+
+  it("keeps the head of engineering away from managers, as administrators are", async () => {
+    const { cookie } = await aManager();
+    const head = await someoneInUse("HEAD_OF_ENGINEERING", "head");
+
+    // Cannot make one — a manager who could would be the reviewer.
+    await request(app)
+      .post("/api/users")
+      .set("Cookie", cookie)
+      .send({
+        email: "second.inbox@hospital.test",
+        fullName: "Also Me",
+        role: "HEAD_OF_ENGINEERING",
+      })
+      .expect(403);
+
+    // Cannot edit the one there is, including taking the address.
+    await request(app)
+      .patch(`/api/users/${head.id}`)
+      .set("Cookie", cookie)
+      .send({ fullName: "Renamed" })
+      .expect(403);
+
+    // Cannot turn an engineer into one either.
+    const engineer = await someoneInUse("ENGINEER", "promote");
+    await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", cookie)
+      .send({ role: "HEAD_OF_ENGINEERING" })
+      .expect(403);
   });
 
   it("refuses a manager the administrators", async () => {

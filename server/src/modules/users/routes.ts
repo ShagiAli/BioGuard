@@ -113,6 +113,60 @@ async function historyOf(userId: string) {
   };
 }
 
+/**
+ * Roles a manager may not grant, edit or remove.
+ *
+ * Administrators were the only protected role, which closed one version
+ * of the attack and left its twin open. The review step exists so that a
+ * repair is signed by one person and accepted by another; a manager who
+ * could make somebody a head of engineering, or quietly take over the one
+ * who exists, could be both. So the reviewer is protected the way an
+ * administrator is, and for the same reason.
+ */
+const PROTECTED_FROM_MANAGERS: readonly Role[] = ["ADMIN", "HEAD_OF_ENGINEERING"];
+
+const PROTECTED = {
+  error: "Only an administrator can manage administrators and heads of engineering.",
+};
+
+function managerOverreach(actorRole: Role, ...roles: (Role | undefined)[]): boolean {
+  return actorRole !== "ADMIN" && roles.some((r) => r && PROTECTED_FROM_MANAGERS.includes(r));
+}
+
+/**
+ * Whether a real person is using this account.
+ *
+ * The line that decides who may redirect it. An account created by
+ * invitation has a password nobody knows, so until its owner sets one
+ * nobody can have used it — correcting its address is fixing a typo, and
+ * a manager should be able to. Once somebody has set a password, or
+ * signed in at all, the address is how that person recovers their account,
+ * and whoever changes it chooses where the next reset link goes.
+ *
+ * Sessions count as well as passwords because seeded accounts sign in
+ * with a known password and never set their own. Both signals are
+ * durable: logging out revokes a session rather than deleting it, and
+ * nothing deletes them otherwise. The second of slack absorbs the two
+ * separate defaults that stamp createdAt and passwordChangedAt when a row
+ * is first written.
+ */
+async function isEstablished(userId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { createdAt: true, passwordChangedAt: true },
+  });
+  if (!user) return false;
+  if (user.passwordChangedAt.getTime() - user.createdAt.getTime() > 1000) return true;
+  return (await prisma.session.count({ where: { userId } })) > 0;
+}
+
+/** Enough of an address to recognise, not enough to hand anybody. */
+function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return "an address you do not recognise";
+  return `${email[0]}${"\u2022".repeat(Math.max(3, at - 1))}${email.slice(at)}`;
+}
+
 const createSchema = z
   .object({
     email: z.email().max(254).trim().toLowerCase(),
@@ -167,8 +221,8 @@ usersRouter.post("/", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, 
   }
 
   const actor = req.user!;
-  if (actor.role !== "ADMIN" && parsed.data.role === "ADMIN") {
-    return res.status(403).json({ error: "Only an administrator can create administrators." });
+  if (managerOverreach(actor.role, parsed.data.role)) {
+    return res.status(403).json(PROTECTED);
   }
 
   if (parsed.data.departmentId) {
@@ -327,14 +381,17 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
   const changes = parsed.data;
 
   /**
-   * A manager may not touch an administrator, nor make one.
+   * A manager may not touch an administrator or a head of engineering,
+   * nor make either.
    *
    * Without this the escalation is two steps and needs no password: set
-   * the administrator's email to your own, ask for a reset, read the
-   * link. Editing people is exactly where that has to be closed.
+   * their email to your own, and the reset link comes to you. It was
+   * closed for administrators only, which left the reviewer open — and a
+   * manager who could become the reviewer could accept a repair signed in
+   * somebody else's name.
    */
-  if (actor.role !== "ADMIN" && (target.role === "ADMIN" || changes.role === "ADMIN")) {
-    return res.status(403).json({ error: "Only an administrator can manage administrators." });
+  if (managerOverreach(actor.role, target.role, changes.role)) {
+    return res.status(403).json(PROTECTED);
   }
 
   // Locking yourself out is not a thing the interface should let you do
@@ -414,6 +471,26 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
    * what puts them out.
    */
   const emailChanged = !!changes.email && changes.email !== target.email;
+
+  /*
+   * Redirecting an account somebody uses is an administrator's decision.
+   *
+   * The protected roles above are one half. This is the other: an
+   * engineer's account is not protected by role, but it signs maintenance
+   * records, and a manager who could point it at their own inbox would
+   * receive the link that makes them that engineer. So a manager may still
+   * correct the address on an invitation nobody has taken up — which is
+   * what the feature is for — but not on an account that is in use.
+   */
+  const established = emailChanged ? await isEstablished(target.id) : false;
+  if (emailChanged && established && actor.role !== "ADMIN") {
+    return res.status(403).json({
+      error:
+        "This person already uses their account, so only an administrator can change the " +
+        "address it signs in with.",
+    });
+  }
+
   const invite = emailChanged ? generateToken() : null;
 
   try {
@@ -449,6 +526,30 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
        * passwordChangedAt is set at creation, so "never set" and "set
        * on the first day" look identical.
        */
+      /*
+       * And tell the address it used to be.
+       *
+       * Only for an account in use. A takeover that locks somebody out
+       * with no word to the inbox they actually read looks, from their
+       * side, like being signed out for no reason; this is the message
+       * that makes it look like what it is. An invitation nobody took up
+       * gets no such notice, because its old address is usually the typo
+       * being corrected — possibly a stranger's inbox, and not one to send
+       * details of the account to.
+       */
+      if (established) {
+        await sendMail({
+          to: target.email,
+          subject: "Your BioGuard sign-in address was changed",
+          text:
+            `The address you sign in to BioGuard with was changed to ` +
+            `${maskEmail(updated.email)} by ${actor.fullName}.\n\n` +
+            `If you expected this, there is nothing to do. If you did not, contact an ` +
+            `administrator straight away: the account will no longer accept this address, ` +
+            `and a link to set its password has gone to the new one.`,
+        });
+      }
+
       await sendMail({
         to: updated.email,
         subject: "Your BioGuard sign-in address has changed",
@@ -512,10 +613,10 @@ usersRouter.delete("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (
 
   const actor = req.user!;
 
-  // The same escalation the patch route closes: a manager who could
-  // delete an administrator could delete every administrator.
-  if (actor.role !== "ADMIN" && target.role === "ADMIN") {
-    return res.status(403).json({ error: "Only an administrator can manage administrators." });
+  // The same protection the patch route applies: a manager who could
+  // delete the protected roles could clear the way to grant them.
+  if (managerOverreach(actor.role, target.role)) {
+    return res.status(403).json(PROTECTED);
   }
 
   if (target.id === actor.id) {

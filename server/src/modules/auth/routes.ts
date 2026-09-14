@@ -6,6 +6,7 @@ import { prisma } from "../../lib/prisma.js";
 import { env, isProd } from "../../env.js";
 import { logger } from "../../lib/logger.js";
 import { sendMail } from "../../lib/email.js";
+import { afterResponse } from "../../lib/afterResponse.js";
 import {
   dummyHash,
   generateToken,
@@ -175,17 +176,17 @@ authRouter.get("/me", requireAuth, (req, res) => {
 
 const forgotSchema = z.object({ email: z.email().max(255) }).strict();
 
-authRouter.post("/forgot-password", resetLimiter, async (req, res) => {
-  const parsed = forgotSchema.safeParse(req.body);
-
-  // Always the same response. Anything else leaks the staff directory.
-  const generic = { message: "If that email is registered, a reset link is on its way." };
-  if (!parsed.success) return res.json(generic);
-
-  const user = await prisma.user.findUnique({
-    where: { email: parsed.data.email.toLowerCase() },
-  });
-  if (!user || !user.isActive) return res.json(generic);
+/**
+ * Issues a reset link, if the address belongs to somebody who can use one.
+ *
+ * Runs after the response. Everything that differs between a registered
+ * address and an unknown one happens in here — the lookup's outcome, the
+ * token, and above all the round trip to the mail server — so none of it
+ * can be timed from outside.
+ */
+async function sendResetLink(email: string): Promise<void> {
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+  if (!user || !user.isActive) return;
 
   const token = generateToken();
   await prisma.passwordResetToken.create({
@@ -204,8 +205,28 @@ authRouter.post("/forgot-password", resetLimiter, async (req, res) => {
       `${env.APP_URL}/reset-password?token=${token}\n\n` +
       `If you did not request this, no action is needed.`,
   });
+}
 
-  res.json(generic);
+authRouter.post("/forgot-password", resetLimiter, async (req, res) => {
+  const parsed = forgotSchema.safeParse(req.body);
+
+  /*
+   * Answer first, identically, before looking anything up.
+   *
+   * The body was always the same, which is why this looked safe. The
+   * timing was not: a registered address waited for a token to be written
+   * and an email to reach the mail server before it was answered, and an
+   * unknown one did not. That difference is the staff directory, read
+   * with a stopwatch rather than a parser.
+   *
+   * Nothing about the address is decided before this line, so there is
+   * nothing for the response time to reflect. The login route already
+   * defends against the same leak with a dummy hash; this is the same
+   * standard applied to the route that had quietly fallen short of it.
+   */
+  res.json({ message: "If that email is registered, a reset link is on its way." });
+
+  if (parsed.success) afterResponse(() => sendResetLink(parsed.data.email));
 });
 
 const resetSchema = z
