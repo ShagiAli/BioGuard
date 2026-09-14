@@ -249,7 +249,13 @@ const updateSchema = z
 const ORDER: Prisma.UserOrderByWithRelationInput[] = [{ role: "asc" }, { fullName: "asc" }];
 
 usersRouter.get("/", requireAuth, requireRole("ADMIN", "MANAGER"), async (req, res) => {
-  const rows = await prisma.user.findMany({ select: PUBLIC_FIELDS, orderBy: ORDER });
+  // Erased accounts are not colleagues, former or otherwise. Their names
+  // live on in the history; they have no place on this page.
+  const rows = await prisma.user.findMany({
+    where: { deletedAt: null },
+    select: PUBLIC_FIELDS,
+    orderBy: ORDER,
+  });
   res.json({ rows, assignableRoles: assignableRoles(req.user!.role) });
 });
 
@@ -337,7 +343,7 @@ usersRouter.get("/:id/workload", requireAuth, requireRole("ADMIN", "MANAGER"), a
   const id = z.uuid().safeParse(req.params.id);
   if (!id.success) return res.status(404).json({ error: "User not found." });
 
-  const exists = await prisma.user.count({ where: { id: id.data } });
+  const exists = await prisma.user.count({ where: { id: id.data, deletedAt: null } });
   if (exists === 0) return res.status(404).json({ error: "User not found." });
 
   res.json(await liveWork(id.data));
@@ -365,7 +371,10 @@ usersRouter.post(
     }
 
     const [from, to] = await Promise.all([
-      prisma.user.findUnique({ where: { id: id.data }, select: { id: true, fullName: true } }),
+      prisma.user.findFirst({
+        where: { id: id.data, deletedAt: null },
+        select: { id: true, fullName: true },
+      }),
       prisma.user.findUnique({
         where: { id: parsed.data.toId },
         select: { id: true, fullName: true, role: true, isActive: true },
@@ -422,8 +431,8 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
     });
   }
 
-  const target = await prisma.user.findUnique({
-    where: { id: id.data },
+  const target = await prisma.user.findFirst({
+    where: { id: id.data, deletedAt: null },
     select: { ...PUBLIC_FIELDS, departmentId: true },
   });
   if (!target) return res.status(404).json({ error: "User not found." });
@@ -716,8 +725,8 @@ usersRouter.delete("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (
   const id = z.uuid().safeParse(req.params.id);
   if (!id.success) return res.status(404).json({ error: "User not found." });
 
-  const target = await prisma.user.findUnique({
-    where: { id: id.data },
+  const target = await prisma.user.findFirst({
+    where: { id: id.data, deletedAt: null },
     select: { ...PUBLIC_FIELDS, departmentId: true },
   });
   if (!target) return res.status(404).json({ error: "User not found." });
@@ -742,22 +751,57 @@ usersRouter.delete("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (
   }
 
   const history = await historyOf(target.id);
-  if (history.total > 0) {
-    const parts = [
-      history.services && `${history.services} service${history.services === 1 ? "" : "s"} signed`,
-      history.workOrders && `${history.workOrders} repair${history.workOrders === 1 ? "" : "s"}`,
-      history.alerts && `${history.alerts} fault${history.alerts === 1 ? "" : "s"} reported`,
-      history.notes && `${history.notes} note${history.notes === 1 ? "" : "s"}`,
-      history.devices && `${history.devices} device${history.devices === 1 ? "" : "s"}`,
-      history.actions && `${history.actions} recorded action${history.actions === 1 ? "" : "s"}`,
-    ].filter(Boolean);
 
-    return res.status(409).json({
-      error:
-        `This account is part of the record: ${parts.join(", ")}. ` +
-        `It stays closed rather than deleted, so the history keeps their name.`,
-      history,
+  /*
+   * Somebody the record points at is erased rather than deleted.
+   *
+   * This used to refuse, and the refusal was right about the danger but
+   * wrong about the remedy. Deleting the row would take their name off
+   * every service they signed and every note they wrote — or fail on the
+   * foreign keys trying. But refusing left no way to remove the account
+   * at all, so a departed colleague's login, address and sessions stayed
+   * in place for good.
+   *
+   * Erasing separates the two. What made them a user goes: the address is
+   * replaced with one that cannot receive mail, the password with one
+   * nobody knows, and their sessions, reset links, notifications and
+   * saved views are removed. What made them part of the record stays: the
+   * row, and the name every history screen reads from it.
+   *
+   * The audit entry carries their name and role but not the address,
+   * since removing the address is much of what erasing is for.
+   */
+  if (history.total > 0) {
+    const unusable = await hashPassword(generateToken(32));
+
+    await prisma.$transaction([
+      prisma.session.deleteMany({ where: { userId: target.id } }),
+      prisma.passwordResetToken.deleteMany({ where: { userId: target.id } }),
+      prisma.notification.deleteMany({ where: { recipientId: target.id } }),
+      prisma.savedView.deleteMany({ where: { ownerId: target.id } }),
+      prisma.user.update({
+        where: { id: target.id },
+        data: {
+          // Unique per account, and .invalid is reserved so nothing sent
+          // to it can ever arrive anywhere.
+          email: `erased+${target.id}@bioguard.invalid`,
+          passwordHash: unusable,
+          isActive: false,
+          deletedAt: new Date(),
+        },
+      }),
+    ]);
+
+    await recordAudit({
+      actorId: actor.id,
+      action: "user.erased",
+      entity: "User",
+      entityId: target.id,
+      before: { fullName: target.fullName, role: target.role },
+      after: { fullName: target.fullName, erased: true, keptOnTheRecord: history },
     });
+
+    return res.json({ erased: true, fullName: target.fullName });
   }
 
   // Audited before the row goes, because afterwards there is nothing to

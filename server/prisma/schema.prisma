@@ -146,8 +146,22 @@ model User {
   lockedUntil       DateTime?
   // Any session issued before this instant is rejected.
   passwordChangedAt DateTime    @default(now())
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+
+  /// When the account was erased while its name stayed on the record.
+  ///
+  /// Somebody who signed services cannot be deleted outright: those
+  /// services, their notes and their recorded actions all point at this
+  /// row, and every screen that shows who did the work reads the name from
+  /// it. So erasing keeps the row and takes away the account — the email
+  /// is replaced with an address that cannot receive mail, the password
+  /// with one nobody knows, sessions and reset links are removed — and
+  /// the person disappears from the People page while their name stays on
+  /// everything they did. The real address is freed, so the same person
+  /// can be invited again as a new account without disturbing the old
+  /// history.
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   sessions          Session[]
   resetTokens       PasswordResetToken[]

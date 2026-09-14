@@ -2534,24 +2534,17 @@ describe("managing people", () => {
     expect(gone).toBeNull();
   });
 
-  it("will not erase somebody the record still points at", async () => {
+  it("erases an account the record points at, and keeps the name on the record", async () => {
     const admin = await login(seeded.adminEmail);
 
-    /*
-     * Its own leaver, not the seeded engineer.
-     *
-     * Deleting is destructive by definition, so a test for it must not
-     * borrow a fixture that later tests still need intact — and the one
-     * thing under test here is history, which is quicker to give
-     * somebody than to arrange through the API.
-     */
+    // Its own leaver, never the seeded engineer: this test removes an account.
     const created = await request(app)
       .post("/api/users")
       .set("Cookie", admin)
       .send({ email: "signed.work@hospital.test", fullName: "Signed Work", role: "ENGINEER" })
       .expect(201);
 
-    await prisma.maintenanceRecord.create({
+    const record = await prisma.maintenanceRecord.create({
       data: {
         equipmentId: seeded.ownDeviceId,
         type: "PREVENTIVE",
@@ -2567,21 +2560,46 @@ describe("managing people", () => {
       .send({ isActive: false })
       .expect(200);
 
-    /*
-     * Finished work stays theirs. A hospital that cannot say who serviced
-     * a ventilator has a maintenance record worth nothing, so the answer
-     * is no — and it says how much rather than only that the answer is no.
-     */
-    const refused = await request(app)
+    const res = await request(app)
       .delete(`/api/users/${created.body.id}`)
       .set("Cookie", admin)
-      .expect(409);
+      .expect(200);
+    expect(res.body.erased).toBe(true);
 
-    expect(refused.body.error).toContain("part of the record");
-    expect(refused.body.history.services).toBe(1);
+    /*
+     * The name stays on what they did. This used to refuse outright,
+     * because deleting the row would take the name off every service they
+     * signed — right about the danger, and no help at all to somebody
+     * trying to remove a departed colleague's account.
+     */
+    const signed = await prisma.maintenanceRecord.findUniqueOrThrow({
+      where: { id: record.id },
+      include: { engineer: { select: { fullName: true } } },
+    });
+    expect(signed.engineer.fullName).toBe("Signed Work");
 
-    const still = await prisma.user.findUnique({ where: { id: created.body.id } });
-    expect(still).not.toBeNull();
+    // But the account is gone: no address, no way in, no place on the page.
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: created.body.id } });
+    expect(row.email).not.toBe("signed.work@hospital.test");
+    expect(row.email.endsWith("@bioguard.invalid")).toBe(true);
+    expect(row.isActive).toBe(false);
+    expect(row.deletedAt).not.toBeNull();
+
+    const listed = await request(app).get("/api/users").set("Cookie", admin).expect(200);
+    expect(listed.body.rows.some((p: { id: string }) => p.id === created.body.id)).toBe(false);
+
+    await request(app)
+      .patch(`/api/users/${created.body.id}`)
+      .set("Cookie", admin)
+      .send({ fullName: "Back From The Dead" })
+      .expect(404);
+
+    // And the real address is free, so the same person can be invited again.
+    await request(app)
+      .post("/api/users")
+      .set("Cookie", admin)
+      .send({ email: "signed.work@hospital.test", fullName: "Signed Work", role: "ENGINEER" })
+      .expect(201);
   });
 
   it("keeps deletion away from administrators and from yourself", async () => {
