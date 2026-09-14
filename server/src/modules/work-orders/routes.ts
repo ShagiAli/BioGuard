@@ -329,6 +329,25 @@ workOrdersRouter.patch("/:id", requireAuth, requireRole("ENGINEER", "ADMIN"), as
     if (!move.ok) return res.status(409).json({ error: move.reason });
   }
 
+  /*
+   * Nothing is complete until somebody has written what was done.
+   *
+   * Checked here as well as at the close, because the two refusals reach
+   * different people. At the close it stops a blank maintenance record,
+   * but it stops the reviewer — who cannot write this, was not there,
+   * and can only go and ask. Here it stops the engineer, at the moment
+   * they are looking at the work order and are the only person who
+   * knows the answer.
+   */
+  if (parsed.data.status === "COMPLETED") {
+    const account = parsed.data.repairActions ?? before.repairActions;
+    if (!account || !account.trim()) {
+      return res.status(409).json({
+        error: "Record what you did under Repair actions before marking this complete.",
+      });
+    }
+  }
+
   const nextStatus = parsed.data.status ?? before.status;
 
   const nowComplete = parsed.data.status === "COMPLETED" && before.status !== "COMPLETED";

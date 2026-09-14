@@ -112,7 +112,18 @@ export function WorkOrderDetail() {
       .filter((at): at is string => at !== null)
       .sort()[0] ?? null;
   const isClosed = wo.status === "CLOSED";
-  const canEdit = !isClosed || user?.role === "ADMIN";
+  /*
+   * Who may write the engineer's account of the repair.
+   *
+   * Said the same thing the server says, rather than something looser.
+   * It was "anybody, until it closes", so a reviewer opening a repair
+   * saw findings, diagnosis and repair actions as editable boxes,
+   * typed in one, and got a 403 from a route that only ever allowed
+   * engineers and administrators. An input you are allowed to fill in
+   * and not allowed to save is worse than a disabled one: it looks like
+   * the place to do the thing.
+   */
+  const canEdit = user?.role === "ADMIN" || (!isClosed && user?.role === "ENGINEER");
 
   /*
    * Accepting or sending back a repair belongs to the head of the
@@ -548,7 +559,8 @@ function CloseDialog({
               </p>
             ) : (
               <p className="mt-1 text-sm text-rose-700">
-                Nothing yet. They need to fill in Repair actions before this can be closed.
+                Nothing yet. {engineerName} fills this in under Repair actions on the Work details
+                tab — it is their account of the repair, so it is not yours to write.
               </p>
             )}
           </div>

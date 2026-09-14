@@ -918,7 +918,7 @@ describe("work orders", () => {
     await request(app)
       .patch(`/api/work-orders/${wo.body.id}`)
       .set("Cookie", cookie)
-      .send({ status: "COMPLETED" })
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" })
       .expect(200);
   });
 
@@ -979,7 +979,7 @@ describe("work orders", () => {
     await request(app)
       .patch(`/api/work-orders/${wo.body.id}`)
       .set("Cookie", engineer)
-      .send({ status: "COMPLETED" })
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" })
       .expect(200);
 
     return { id: wo.body.id as string, engineer };
@@ -1110,7 +1110,7 @@ describe("work orders", () => {
     const again = await request(app)
       .patch(`/api/work-orders/${id}`)
       .set("Cookie", engineer)
-      .send({ status: "COMPLETED" })
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" })
       .expect(200);
 
     // Last week's complaint must not sit beside this week's work.
@@ -1233,14 +1233,47 @@ describe("work orders", () => {
     expect(record.workPerformed).toBe(theirs);
   });
 
+  it("will not let an engineer complete a repair they have not described", async () => {
+    const alert = await assignedAlert();
+    const cookie = await login(seeded.engineerEmail);
+    const wo = await request(app)
+      .post("/api/work-orders")
+      .set("Cookie", cookie)
+      .send({ alertId: alert.id })
+      .expect(201);
+
+    /*
+     * The refusal belongs here rather than at the close. Both stop a
+     * blank maintenance record, but this one stops the person who knows
+     * the answer, at the moment they are looking at the work order.
+     */
+    const refused = await request(app)
+      .patch(`/api/work-orders/${wo.body.id}`)
+      .set("Cookie", cookie)
+      .send({ status: "COMPLETED" })
+      .expect(409);
+
+    expect(refused.body.error).toContain("Repair actions");
+
+    const unchanged = await prisma.workOrder.findUniqueOrThrow({ where: { id: wo.body.id } });
+    expect(unchanged.status).not.toBe("COMPLETED");
+  });
+
   it("will not close a repair nobody has described", async () => {
     const { id } = await awaitingReview();
 
     /*
+     * The backstop, for work orders that reached COMPLETED before the
+     * rule above existed — which real data has, so the state is reached
+     * the way real data reached it rather than through the API that now
+     * refuses to create it.
+     *
      * A maintenance record that cannot say what was done is worse than
      * no record: it looks like evidence. The refusal names who has to
      * act, since the reviewer cannot write this themselves.
      */
+    await prisma.workOrder.update({ where: { id }, data: { repairActions: null } });
+
     const refused = await request(app)
       .post(`/api/work-orders/${id}/close`)
       .set("Cookie", await login(seeded.reviewerEmail))
@@ -1278,7 +1311,7 @@ describe("work orders", () => {
     await request(app)
       .patch(`/api/work-orders/${wo.body.id}`)
       .set("Cookie", cookie)
-      .send({ status: "COMPLETED" });
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" });
 
     const closed = await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
@@ -1322,7 +1355,7 @@ describe("work orders", () => {
     await request(app)
       .patch(`/api/work-orders/${wo.body.id}`)
       .set("Cookie", engineer)
-      .send({ status: "COMPLETED" });
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" });
     await request(app)
       .post(`/api/work-orders/${wo.body.id}/close`)
       .set("Cookie", await login(seeded.reviewerEmail))
@@ -1449,7 +1482,7 @@ describe("parts", () => {
     await request(app)
       .patch(`/api/work-orders/${workOrderId}`)
       .set("Cookie", cookie)
-      .send({ status: "COMPLETED" });
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" });
 
     // The device must not go back to the ward with a part still on order.
     const refused = await request(app)
@@ -1481,7 +1514,7 @@ describe("parts", () => {
     await request(app)
       .patch(`/api/work-orders/${workOrderId}`)
       .set("Cookie", cookie)
-      .send({ status: "COMPLETED" });
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" });
 
     await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
@@ -1577,7 +1610,7 @@ describe("parts", () => {
     await request(app)
       .patch(`/api/work-orders/${workOrderId}`)
       .set("Cookie", cookie)
-      .send({ status: "COMPLETED" });
+      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" });
     await request(app)
       .post(`/api/work-orders/${workOrderId}/close`)
       .set("Cookie", await login(seeded.reviewerEmail))
