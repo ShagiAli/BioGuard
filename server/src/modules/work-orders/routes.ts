@@ -18,7 +18,12 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { EXPORT_ROW_LIMIT, orderByFrom, sendCsv, sortSchema } from "../../lib/listing.js";
 import { recordAudit } from "../../lib/audit.js";
-import { notifyAwaitingReview, notifyPartNeeded, notifyRepairRejected } from "./notify.js";
+import {
+  notifyAwaitingReview,
+  notifyPartNeeded,
+  notifyRepairAccepted,
+  notifyRepairRejected,
+} from "./notify.js";
 import { alertScope, requireAuth, requireRole } from "../../middleware/auth.js";
 import {
   canEditWorkOrder,
@@ -442,6 +447,14 @@ const closeSchema = z
      * reports the two as one number cannot answer either question.
      */
     labourHours: z.coerce.number().min(0).max(999).optional(),
+    /**
+     * What the reviewer adds on accepting. All optional: a repair that
+     * was simply correct should not need three paragraphs written about
+     * it, and a required field would only teach people to type "fine".
+     */
+    engineerFeedback: z.string().max(2000).trim().optional(),
+    reviewChecks: z.string().max(2000).trim().optional(),
+    watchFor: z.string().max(2000).trim().optional(),
   })
   .strict();
 
@@ -659,6 +672,9 @@ workOrdersRouter.post(
           repairActions: parsed.data.repairActions,
           finalResolution: parsed.data.finalResolution,
           labourHours: parsed.data.labourHours ?? null,
+          engineerFeedback: parsed.data.engineerFeedback || null,
+          reviewChecks: parsed.data.reviewChecks || null,
+          watchFor: parsed.data.watchFor || null,
           completedAt: before.completedAt ?? closedAt,
           closedAt,
           closedById: req.user!.id,
@@ -697,6 +713,30 @@ workOrdersRouter.post(
       include: { equipment: { select: { name: true, assetNo: true } } },
     });
     await notifyResolved(alert, parsed.data.finalResolution);
+
+    /*
+     * Feedback reaches the person it is about.
+     *
+     * Only when there is some: an acceptance on its own is already
+     * visible in the application and does not need to interrupt anybody.
+     * Written on the work order either way, so the next reviewer can see
+     * what the last one said.
+     */
+    if (closed.engineerFeedback) {
+      const engineer = await prisma.user.findUnique({
+        where: { id: closed.engineerId },
+        select: { id: true, email: true },
+      });
+      if (engineer) {
+        await notifyRepairAccepted({
+          workOrder: closed,
+          equipment: closed.equipment,
+          engineer,
+          feedback: closed.engineerFeedback,
+          reviewer: { fullName: req.user!.fullName },
+        });
+      }
+    }
 
     res.json(present(closed));
   }

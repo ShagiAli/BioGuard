@@ -142,9 +142,7 @@ export function WorkOrderDetail() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-medium text-slate-900">{wo.equipment.name}</h1>
             <Badge tone={priorityTone(wo.priority)}>{PRIORITY_LABELS[wo.priority]}</Badge>
-            <Badge tone={isClosed ? "emerald" : "sky"}>
-              {WORK_ORDER_STATUS_LABELS[wo.status]}
-            </Badge>
+            <Badge tone={isClosed ? "emerald" : "sky"}>{WORK_ORDER_STATUS_LABELS[wo.status]}</Badge>
           </div>
           <div className="mt-1 font-mono text-xs text-slate-500">
             {wo.number} · Asset {wo.equipment.assetNo} · Engineer {wo.engineer.fullName}
@@ -180,8 +178,8 @@ export function WorkOrderDetail() {
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
           <Lock size={15} className="mt-0.5 shrink-0 text-sky-400" />
           <span>
-            Waiting for the head of engineering to check the device. It stays out of service
-            until they accept the repair.
+            Waiting for the head of engineering to check the device. It stays out of service until
+            they accept the repair.
           </span>
         </div>
       )}
@@ -196,6 +194,51 @@ export function WorkOrderDetail() {
               ? "As an administrator you can still amend it; the change is recorded."
               : "Closed work orders are read-only."}
           </span>
+        </div>
+      )}
+
+      {/*
+        The review, once there is one. Written by somebody other than the
+        engineer, so it sits apart from the repair rather than among it —
+        and above the tabs, because an engineer opening a closed repair
+        of their own is most likely here to read exactly this.
+      */}
+      {isClosed && (wo.engineerFeedback || wo.reviewChecks || wo.watchFor) && (
+        <div className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-400">
+            Reviewed{wo.closedBy ? ` by ${wo.closedBy.fullName}` : ""}
+          </p>
+
+          {wo.engineerFeedback && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">
+                For {wo.engineer.fullName}
+              </p>
+              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                {wo.engineerFeedback}
+              </p>
+            </div>
+          )}
+
+          {wo.reviewChecks && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">What was checked</p>
+              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                {wo.reviewChecks}
+              </p>
+            </div>
+          )}
+
+          {wo.watchFor && (
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">
+                Watch this device for
+              </p>
+              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-amber-800">
+                {wo.watchFor}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -223,48 +266,48 @@ export function WorkOrderDetail() {
 
           {tab === "work" && (
             <>
-          <Card className="p-4">
-            <h2 className="mb-3 text-sm font-medium text-slate-800">Reported problem</h2>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-              {wo.alert.description}
-            </p>
-            <p className="mt-2 text-xs text-slate-400">
-              Reported by {wo.alert.raisedBy.fullName}
-            </p>
-          </Card>
+              <Card className="p-4">
+                <h2 className="mb-3 text-sm font-medium text-slate-800">Reported problem</h2>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                  {wo.alert.description}
+                </p>
+                <p className="mt-2 text-xs text-slate-400">
+                  Reported by {wo.alert.raisedBy.fullName}
+                </p>
+              </Card>
 
-          <Card className="p-4">
-            <h2 className="mb-3 text-sm font-medium text-slate-800">Investigation</h2>
-            <div className="space-y-3">
-              <TextArea
-                label="Findings"
-                value={wo.findings}
-                disabled={!canEdit || update.isPending}
-                onSave={(findings) => update.mutate({ findings })}
-              />
-              <TextArea
-                label="Diagnosis"
-                value={wo.diagnosis}
-                disabled={!canEdit || update.isPending}
-                onSave={(diagnosis) => update.mutate({ diagnosis })}
-              />
-              <TextArea
-                label="Repair actions"
-                value={wo.repairActions}
-                disabled={!canEdit || update.isPending}
-                onSave={(repairActions) => update.mutate({ repairActions })}
-              />
-            </div>
-          </Card>
+              <Card className="p-4">
+                <h2 className="mb-3 text-sm font-medium text-slate-800">Investigation</h2>
+                <div className="space-y-3">
+                  <TextArea
+                    label="Findings"
+                    value={wo.findings}
+                    disabled={!canEdit || update.isPending}
+                    onSave={(findings) => update.mutate({ findings })}
+                  />
+                  <TextArea
+                    label="Diagnosis"
+                    value={wo.diagnosis}
+                    disabled={!canEdit || update.isPending}
+                    onSave={(diagnosis) => update.mutate({ diagnosis })}
+                  />
+                  <TextArea
+                    label="Repair actions"
+                    value={wo.repairActions}
+                    disabled={!canEdit || update.isPending}
+                    onSave={(repairActions) => update.mutate({ repairActions })}
+                  />
+                </div>
+              </Card>
 
-          {wo.finalResolution && (
-            <Card className="p-4">
-              <h2 className="mb-2 text-sm font-medium text-slate-800">Final resolution</h2>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-                {wo.finalResolution}
-              </p>
-            </Card>
-          )}
+              {wo.finalResolution && (
+                <Card className="p-4">
+                  <h2 className="mb-2 text-sm font-medium text-slate-800">Final resolution</h2>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                    {wo.finalResolution}
+                  </p>
+                </Card>
+              )}
             </>
           )}
 
@@ -277,7 +320,6 @@ export function WorkOrderDetail() {
           )}
 
           {tab === "notes" && <Notes basePath={`/api/work-orders/${wo.id}`} />}
-
         </section>
 
         <aside className="space-y-5">
@@ -347,6 +389,7 @@ export function WorkOrderDetail() {
       {closing && (
         <CloseDialog
           busy={close.isPending}
+          engineerName={wo.engineer.fullName}
           onCancel={() => setClosing(false)}
           onConfirm={(body) => close.mutate(body)}
         />
@@ -459,10 +502,12 @@ function TextArea({
 
 function CloseDialog({
   busy,
+  engineerName,
   onCancel,
   onConfirm,
 }: {
   busy: boolean;
+  engineerName: string;
   onCancel: () => void;
   onConfirm: (body: Record<string, unknown>) => void;
 }) {
@@ -471,6 +516,9 @@ function CloseDialog({
   const [cost, setCost] = useState("");
   const [downtimeHours, setDowntimeHours] = useState("0");
   const [labourHours, setLabourHours] = useState("");
+  const [engineerFeedback, setEngineerFeedback] = useState("");
+  const [reviewChecks, setReviewChecks] = useState("");
+  const [watchFor, setWatchFor] = useState("");
 
   const ready = repairActions.trim() && finalResolution.trim();
 
@@ -486,7 +534,9 @@ function CloseDialog({
 
         <div className="space-y-3 p-4">
           <label className="block">
-            <span className="text-xs uppercase tracking-wide text-slate-500">Repair carried out</span>
+            <span className="text-xs uppercase tracking-wide text-slate-500">
+              Repair carried out
+            </span>
             <textarea
               rows={3}
               value={repairActions}
@@ -531,9 +581,7 @@ function CloseDialog({
               />
             </label>
             <label className="block">
-              <span className="text-xs uppercase tracking-wide text-slate-500">
-                Labour (hours)
-              </span>
+              <span className="text-xs uppercase tracking-wide text-slate-500">Labour (hours)</span>
               <input
                 type="number"
                 min="0"
@@ -544,7 +592,63 @@ function CloseDialog({
               />
               {/* Not the same as downtime: an hour of work can sit inside
                   three weeks of waiting for a part. */}
-              <span className="mt-1 block text-xs text-slate-400">Engineer time, not downtime.</span>
+              <span className="mt-1 block text-xs text-slate-400">
+                Engineer time, not downtime.
+              </span>
+            </label>
+          </div>
+
+          {/*
+            The reviewer's own additions, all optional and kept apart
+            from the repair itself — the fields above are the engineer's
+            account of what they did, and these are somebody else's
+            reading of it. Optional on purpose: a repair that was simply
+            correct should not need three paragraphs about it, and a
+            required box only teaches people to type "fine".
+          */}
+          <div className="space-y-3 border-t border-slate-100 pt-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Your review — optional</p>
+
+            <label className="block">
+              <span className="text-xs uppercase tracking-wide text-slate-500">
+                Feedback for {engineerName}
+              </span>
+              <textarea
+                rows={2}
+                value={engineerFeedback}
+                onChange={(e) => setEngineerFeedback(e.target.value)}
+                placeholder="What they did well, or would do differently next time"
+                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm outline-none focus:border-teal-500"
+              />
+              <span className="mt-1 block text-xs text-slate-400">
+                Emailed to them with the acceptance. Left empty, nothing is sent.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="text-xs uppercase tracking-wide text-slate-500">
+                What you checked
+              </span>
+              <textarea
+                rows={2}
+                value={reviewChecks}
+                onChange={(e) => setReviewChecks(e.target.value)}
+                placeholder="How you satisfied yourself the device is fit to return"
+                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm outline-none focus:border-teal-500"
+              />
+            </label>
+
+            <label className="block">
+              <span className="text-xs uppercase tracking-wide text-slate-500">
+                Watch this device for
+              </span>
+              <textarea
+                rows={2}
+                value={watchFor}
+                onChange={(e) => setWatchFor(e.target.value)}
+                placeholder="Anything the next service should look at"
+                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm outline-none focus:border-teal-500"
+              />
             </label>
           </div>
         </div>
@@ -562,6 +666,9 @@ function CloseDialog({
                 ...(cost ? { cost: Number(cost) } : {}),
                 ...(labourHours ? { labourHours: Number(labourHours) } : {}),
                 downtimeHours: Number(downtimeHours) || 0,
+                ...(engineerFeedback.trim() ? { engineerFeedback: engineerFeedback.trim() } : {}),
+                ...(reviewChecks.trim() ? { reviewChecks: reviewChecks.trim() } : {}),
+                ...(watchFor.trim() ? { watchFor: watchFor.trim() } : {}),
               })
             }
           >

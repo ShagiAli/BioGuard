@@ -1142,6 +1142,60 @@ describe("work orders", () => {
     expect(record.engineerId).toBe(engineerRow.id);
   });
 
+  it("carries the reviewer's feedback to the engineer", async () => {
+    const { id } = await awaitingReview();
+    const headCookie = await login(seeded.reviewerEmail);
+    await prisma.sentEmail.deleteMany();
+    await prisma.notification.deleteMany();
+
+    const closed = await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", headCookie)
+      .send({
+        repairActions: "Replaced board.",
+        finalResolution: "Back in service.",
+        engineerFeedback: "Neat work. Next time photograph the serial before removing the panel.",
+        reviewChecks: "Ran self-test twice and checked the alarm on battery.",
+        watchFor: "Fan noise at high flow.",
+      })
+      .expect(200);
+
+    // All three land on the work order, which is where the next reviewer
+    // will look for what the last one said.
+    expect(closed.body.engineerFeedback).toContain("photograph the serial");
+    expect(closed.body.reviewChecks).toContain("self-test");
+    expect(closed.body.watchFor).toBe("Fan noise at high flow.");
+
+    /*
+     * A review that can only reject teaches nothing, so the accepted
+     * ones have to reach the person they are about.
+     */
+    const told = await prisma.sentEmail.findFirstOrThrow({
+      where: { to: seeded.engineerEmail, subject: { contains: "Accepted" } },
+    });
+    expect(told.body).toContain("photograph the serial");
+    expect(told.body).toContain("Head of Engineering");
+  });
+
+  it("says nothing to the engineer when there is nothing to say", async () => {
+    const { id } = await awaitingReview();
+    const headCookie = await login(seeded.reviewerEmail);
+    await prisma.sentEmail.deleteMany();
+
+    await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", headCookie)
+      .send({ repairActions: "Replaced board.", finalResolution: "Back in service." })
+      .expect(200);
+
+    // An acceptance is already visible in the application. Mailing
+    // somebody to tell them nothing is how a sender gets filtered.
+    const accepted = await prisma.sentEmail.count({
+      where: { subject: { contains: "Accepted" } },
+    });
+    expect(accepted).toBe(0);
+  });
+
   it("refuses to close before the work is marked complete", async () => {
     const alert = await assignedAlert();
     const cookie = await login(seeded.engineerEmail);

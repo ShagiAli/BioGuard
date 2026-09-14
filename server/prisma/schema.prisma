@@ -514,6 +514,26 @@ model WorkOrder {
   closedById  String?   @db.Uuid
   closedBy    User?     @relation("WorkOrderCloser", fields: [closedById], references: [id])
 
+  /// What the reviewer added when they accepted the repair. All three
+  /// optional, and all three for different readers — which is why they
+  /// are three fields and not one box.
+  ///
+  /// engineerFeedback goes to the engineer, by email and in the
+  /// application. A review that can only reject teaches nothing: the
+  /// repairs worth learning from are mostly the accepted ones, and the
+  /// person who checked the device is the only one placed to say so.
+  ///
+  /// reviewChecks is the reviewer's own account of what they did to
+  /// satisfy themselves. Without it "accepted" records a click, and the
+  /// gate is a rubber stamp wearing a signature.
+  ///
+  /// watchFor is for whoever opens this device next, at a service nobody
+  /// has scheduled yet. It travels with the work order rather than the
+  /// engineer, because it is about the machine.
+  engineerFeedback String?
+  reviewChecks     String?
+  watchFor         String?
+
   /// Why a reviewing head sent the repair back, and who said so.
   ///
   /// On the work order rather than only in the audit log, because the

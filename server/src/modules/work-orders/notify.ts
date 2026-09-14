@@ -156,6 +156,57 @@ export async function notifyAwaitingReview({ workOrder, equipment }: ReviewConte
 }
 
 /**
+ * A repair was accepted, and somebody wrote something worth reading.
+ *
+ * Only sent when there is feedback. An acceptance on its own is visible
+ * in the application and does not need to interrupt anybody — but a
+ * review that can only reject teaches nothing, and the repairs worth
+ * learning from are mostly the ones that were fine.
+ */
+export async function notifyRepairAccepted({
+  workOrder,
+  equipment,
+  engineer,
+  feedback,
+  reviewer,
+}: ReviewContext & {
+  engineer: { id: string; email: string };
+  feedback: string;
+  reviewer: { fullName: string };
+}): Promise<void> {
+  const reference = workOrderNumber(workOrder.seq, workOrder.createdAt);
+  const title = `Accepted: ${equipment.name} (${equipment.assetNo})`;
+  const body =
+    `Your repair to ${equipment.name}, asset ${equipment.assetNo}, in ` +
+    `${equipment.department.name} was checked and accepted. The device is back in service.\n\n` +
+    `From ${reviewer.fullName}:\n${feedback}\n\n` +
+    `Work order: ${reference}`;
+
+  try {
+    await prisma.notification.create({
+      data: {
+        recipientId: engineer.id,
+        equipmentId: equipment.id,
+        // Good news, and nobody has to act on it today.
+        level: "INFO",
+        title,
+        body,
+      },
+    });
+
+    await sendMailMany([
+      {
+        to: engineer.email,
+        subject: title,
+        text: `${body}\n\nOpen in BioGuard: ${env.APP_URL}/work-orders/${workOrder.id}`,
+      },
+    ]);
+  } catch (err) {
+    logger.error({ err, workOrderId: workOrder.id }, "acceptance notification failed");
+  }
+}
+
+/**
  * A repair was not accepted, and the engineer has to know why.
  *
  * To the named engineer rather than to a role: this is one person's work

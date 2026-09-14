@@ -57,12 +57,7 @@ export const api = {
 // ------------------------------------------------------------- types
 
 export type Role =
-  | "ADMIN"
-  | "ENGINEER"
-  | "STAFF"
-  | "MANAGER"
-  | "HEAD_OF_ALERTS"
-  | "HEAD_OF_ENGINEERING";
+  "ADMIN" | "ENGINEER" | "STAFF" | "MANAGER" | "HEAD_OF_ALERTS" | "HEAD_OF_ENGINEERING";
 
 export interface User {
   id: string;
@@ -169,7 +164,7 @@ export interface Notification {
 
 // -------------------------------------------------------- formatting
 
-const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -378,18 +373,20 @@ export function auditChanges(entry: AuditEntry): AuditChange[] {
       ? true
       : JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-  return keys
-    .filter((key) => !same(before[key], after[key]))
-    // Foreign keys stay in the audit table for forensics, but a bare
-    // UUID tells a reader nothing. Who something was assigned to is
-    // shown by name on the record itself; here it would only be noise.
-    .filter((key) => !/Id$/.test(key))
-    .map((key) => ({
-      field: key,
-      label: AUDIT_FIELD_LABELS[key] ?? humanise(key),
-      from: auditValue(key, before[key]),
-      to: auditValue(key, after[key]),
-    }));
+  return (
+    keys
+      .filter((key) => !same(before[key], after[key]))
+      // Foreign keys stay in the audit table for forensics, but a bare
+      // UUID tells a reader nothing. Who something was assigned to is
+      // shown by name on the record itself; here it would only be noise.
+      .filter((key) => !/Id$/.test(key))
+      .map((key) => ({
+        field: key,
+        label: AUDIT_FIELD_LABELS[key] ?? humanise(key),
+        from: auditValue(key, before[key]),
+        to: auditValue(key, after[key]),
+      }))
+  );
 }
 
 // ------------------------------------------- alerts and work orders
@@ -397,20 +394,10 @@ export function auditChanges(entry: AuditEntry): AuditChange[] {
 export type Priority = "EMERGENCY" | "MEDIUM" | "LOW";
 
 export type AlertStatus =
-  | "OPEN"
-  | "ACKNOWLEDGED"
-  | "ASSIGNED"
-  | "IN_PROGRESS"
-  | "RESOLVED"
-  | "CANCELLED";
+  "OPEN" | "ACKNOWLEDGED" | "ASSIGNED" | "IN_PROGRESS" | "RESOLVED" | "CANCELLED";
 
 export type WorkOrderStatus =
-  | "INVESTIGATING"
-  | "AWAITING_PARTS"
-  | "IN_REPAIR"
-  | "COMPLETED"
-  | "CLOSED"
-  | "CANCELLED";
+  "INVESTIGATING" | "AWAITING_PARTS" | "IN_REPAIR" | "COMPLETED" | "CLOSED" | "CANCELLED";
 
 export interface Alert {
   id: string;
@@ -490,15 +477,14 @@ export interface WorkOrder {
   /** Set while a repair has been sent back and not yet re-completed. */
   rejectionReason: string | null;
   rejectedAt: string | null;
+  /** What the reviewer added on accepting. All optional. */
+  engineerFeedback: string | null;
+  reviewChecks: string | null;
+  watchFor: string | null;
 }
 
 export type PartStatus =
-  | "REQUIRED"
-  | "REQUESTED"
-  | "ORDERED"
-  | "RECEIVED"
-  | "INSTALLED"
-  | "CANCELLED";
+  "REQUIRED" | "REQUESTED" | "ORDERED" | "RECEIVED" | "INSTALLED" | "CANCELLED";
 
 export interface WorkOrderPart {
   id: string;
