@@ -471,14 +471,9 @@ const closeSchema = z
      */
     repairActions: z.string().min(1).max(4000).optional(),
     finalResolution: z.string().min(1, "Record the outcome.").max(2000),
-    cost: z.coerce.number().min(0).max(10_000_000).optional(),
-    downtimeHours: z.coerce.number().int().min(0).max(10_000).default(0),
-    /**
-     * Engineer time, which is not downtime. An hour of work can sit
-     * inside three weeks of waiting for a part, and a department that
-     * reports the two as one number cannot answer either question.
-     */
-    labourHours: z.coerce.number().min(0).max(999).optional(),
+    // Cost, downtime and labour are not taken here. They are a manager's
+    // to record, on their own route, and the maintenance record copies
+    // whatever the work order holds when it closes.
     /**
      * What the reviewer adds on accepting. All optional: a repair that
      * was simply correct should not need three paragraphs written about
@@ -709,8 +704,8 @@ workOrdersRouter.post(
           problem: before.alert.description,
           findings: before.findings,
           workPerformed: account,
-          cost: parsed.data.cost ?? null,
-          downtimeHours: parsed.data.downtimeHours,
+          cost: before.cost,
+          downtimeHours: before.downtimeHours ?? 0,
         },
       });
 
@@ -720,7 +715,6 @@ workOrdersRouter.post(
           status: "CLOSED",
           repairActions: account,
           finalResolution: parsed.data.finalResolution,
-          labourHours: parsed.data.labourHours ?? null,
           engineerFeedback: parsed.data.engineerFeedback || null,
           reviewChecks: parsed.data.reviewChecks || null,
           watchFor: parsed.data.watchFor || null,
@@ -788,6 +782,99 @@ workOrdersRouter.post(
     }
 
     res.json(present(closed));
+  }
+);
+
+// -------------------------------------------------------------- costs
+
+const costsSchema = z
+  .object({
+    cost: z.coerce.number().min(0).max(10_000_000).nullable().optional(),
+    downtimeHours: z.coerce.number().int().min(0).max(10_000).nullable().optional(),
+    labourHours: z.coerce.number().min(0).max(999).nullable().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: "Nothing to record." });
+
+/**
+ * What a repair cost, in money and in time.
+ *
+ * A manager's to record, and an administrator's. Not the engineer's,
+ * who does not see the invoice and cannot say how long the ward went
+ * without; not the reviewer's, who is checking the device rather than
+ * the budget.
+ *
+ * Open at every stage, including after the repair has closed, which is
+ * the point of giving it its own route rather than a place on a form. A
+ * closed work order is otherwise read-only, and rightly — but that rule
+ * protects the account of what was done, and nobody's account of the
+ * repair changes when the invoice arrives a fortnight later.
+ *
+ * Kept in step with the maintenance record once there is one, because
+ * that is the copy reports read: a figure corrected on the work order and
+ * left stale in the device's history would be two answers to one question.
+ */
+workOrdersRouter.patch(
+  "/:id/costs",
+  requireAuth,
+  requireRole("MANAGER", "ADMIN"),
+  async (req, res) => {
+    const id = z.uuid().safeParse(req.params.id);
+    if (!id.success) return res.status(404).json({ error: "Work order not found." });
+
+    const parsed = costsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: parsed.error.issues[0]?.message ?? "Check the figures." });
+    }
+
+    const before = await prisma.workOrder.findFirst({
+      where: { id: id.data, ...scoped(req.user!) },
+      include: DETAIL_INCLUDE,
+    });
+    if (!before) return res.status(404).json({ error: "Work order not found." });
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const wo = await tx.workOrder.update({
+        where: { id: before.id },
+        data: parsed.data,
+        include: DETAIL_INCLUDE,
+      });
+
+      if (wo.maintenanceRecordId) {
+        const record: Record<string, unknown> = {};
+        if ("cost" in parsed.data) record.cost = parsed.data.cost;
+        if ("downtimeHours" in parsed.data) record.downtimeHours = parsed.data.downtimeHours ?? 0;
+        if (Object.keys(record).length > 0) {
+          await tx.maintenanceRecord.update({
+            where: { id: wo.maintenanceRecordId },
+            data: record,
+          });
+        }
+      }
+
+      return wo;
+    });
+
+    await recordAudit({
+      actorId: req.user!.id,
+      action: "workorder.costs_recorded",
+      entity: "WorkOrder",
+      entityId: updated.id,
+      before: {
+        cost: before.cost,
+        downtimeHours: before.downtimeHours,
+        labourHours: before.labourHours,
+      },
+      after: {
+        cost: updated.cost,
+        downtimeHours: updated.downtimeHours,
+        labourHours: updated.labourHours,
+      },
+    });
+
+    res.json(present(updated));
   }
 );
 

@@ -63,6 +63,20 @@ async function login(email: string, password = PASSWORD): Promise<string[]> {
   return cookie;
 }
 
+async function aManager() {
+  const manager = await prisma.user.upsert({
+    where: { email: "people.manager@test.local" },
+    update: { isActive: true, role: "MANAGER" },
+    create: {
+      email: "people.manager@test.local",
+      passwordHash: await hashPassword(PASSWORD),
+      fullName: "People Manager",
+      role: "MANAGER",
+    },
+  });
+  return { manager, cookie: await login(manager.email) };
+}
+
 beforeAll(async () => {
   // Before anything destructive happens.
   assertTestDatabase(process.env.DATABASE_URL);
@@ -1319,8 +1333,6 @@ describe("work orders", () => {
       .send({
         repairActions: "Replaced power supply board.",
         finalResolution: "Tested and returned to service.",
-        cost: 420,
-        downtimeHours: 6,
       })
       .expect(200);
 
@@ -1342,6 +1354,60 @@ describe("work orders", () => {
 
     const resolved = await prisma.alert.findUniqueOrThrow({ where: { id: alert.id } });
     expect(resolved.status).toBe("RESOLVED");
+  });
+
+  it("lets a manager record what a repair cost, even after it closes", async () => {
+    const { id } = await awaitingReview();
+    await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", await login(seeded.reviewerEmail))
+      .send({ finalResolution: "Back in service." })
+      .expect(200);
+
+    /*
+     * After the close, deliberately. The invoice usually arrives once the
+     * repair is already done, and a closed work order is otherwise
+     * read-only — so this is the case the separate route exists for.
+     */
+    const { cookie } = await aManager();
+    const recorded = await request(app)
+      .patch(`/api/work-orders/${id}/costs`)
+      .set("Cookie", cookie)
+      .send({ cost: 420.5, downtimeHours: 6, labourHours: 1.5 })
+      .expect(200);
+
+    expect(Number(recorded.body.cost)).toBe(420.5);
+    expect(recorded.body.downtimeHours).toBe(6);
+    expect(Number(recorded.body.labourHours)).toBe(1.5);
+
+    // The device's history reads the maintenance record, so the figures
+    // have to arrive there too or reports and the work order disagree.
+    const wo = await prisma.workOrder.findUniqueOrThrow({ where: { id } });
+    const record = await prisma.maintenanceRecord.findUniqueOrThrow({
+      where: { id: wo.maintenanceRecordId! },
+    });
+    expect(Number(record.cost)).toBe(420.5);
+    expect(record.downtimeHours).toBe(6);
+  });
+
+  it("keeps the figures away from engineers and the reviewer", async () => {
+    const { id } = await awaitingReview();
+
+    // Neither holds the invoice nor answers for the ward's downtime.
+    for (const email of [seeded.engineerEmail, seeded.reviewerEmail]) {
+      await request(app)
+        .patch(`/api/work-orders/${id}/costs`)
+        .set("Cookie", await login(email))
+        .send({ cost: 1 })
+        .expect(403);
+    }
+
+    // And the close cannot set them by the back door.
+    await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", await login(seeded.reviewerEmail))
+      .send({ finalResolution: "Back in service.", cost: 999 })
+      .expect(400);
   });
 
   it("is read-only once closed, except to an administrator", async () => {
@@ -1920,20 +1986,6 @@ describe("hardening", () => {
 
 describe("managing people", () => {
   /** A manager, created here because the shared fixture has none. */
-  async function aManager() {
-    const manager = await prisma.user.upsert({
-      where: { email: "people.manager@test.local" },
-      update: { isActive: true, role: "MANAGER" },
-      create: {
-        email: "people.manager@test.local",
-        passwordHash: await hashPassword(PASSWORD),
-        fullName: "People Manager",
-        role: "MANAGER",
-      },
-    });
-    return { manager, cookie: await login(manager.email) };
-  }
-
   it("shows the roster to oversight, and to nobody else", async () => {
     const admin = await login(seeded.adminEmail);
     const res = await request(app).get("/api/users").set("Cookie", admin).expect(200);

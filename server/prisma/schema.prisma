@@ -502,9 +502,21 @@ model WorkOrder {
   diagnosis       String?
   repairActions   String?
   finalResolution String?
-  /// Engineer time on this repair, recorded when it is closed. Separate
-  /// from downtime, which is how long the device was unavailable: an
-  /// hour of work can sit inside three weeks of waiting for a part.
+  /// What the repair cost the hospital, recorded by a manager.
+  ///
+  /// Three numbers that were asked of whoever closed the work order, which
+  /// once was the engineer and is now the reviewer — and neither holds
+  /// them. Cost arrives on an invoice, often after the repair is closed.
+  /// Downtime is a fact about the ward, not the bench. Labour is a
+  /// resourcing figure. They belong to whoever answers for budget and
+  /// staffing, so they live here and are written separately from the
+  /// repair, at any stage, including after it closes.
+  ///
+  /// Labour stays apart from downtime on purpose: an hour of work can sit
+  /// inside three weeks of waiting for a part, and a department that
+  /// reports the two as one number cannot answer either question.
+  cost            Decimal? @db.Decimal(12, 2)
+  downtimeHours   Int?
   labourHours     Decimal? @db.Decimal(5, 2)
 
   createdAt   DateTime  @default(now())

@@ -456,6 +456,8 @@ export interface WorkOrder {
   completedAt: string | null;
   closedAt: string | null;
   labourHours: string | null;
+  cost: string | null;
+  downtimeHours: number | null;
   maintenanceRecordId: string | null;
   alert: {
     id: string;

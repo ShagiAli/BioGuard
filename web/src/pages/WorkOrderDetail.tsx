@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Lock, RotateCcw } from "lucide-react";
+import { ArrowLeft, Lock, Pencil, RotateCcw } from "lucide-react";
 import {
   api,
   ApiError,
@@ -394,6 +394,14 @@ export function WorkOrderDetail() {
               </Field>
             </div>
           </Card>
+
+          <CostsCard
+            workOrderId={wo.id}
+            cost={wo.cost}
+            downtimeHours={wo.downtimeHours}
+            labourHours={wo.labourHours}
+            canRecord={user?.role === "MANAGER" || user?.role === "ADMIN"}
+          />
         </aside>
       </div>
 
@@ -654,5 +662,131 @@ function CloseDialog({
         </footer>
       </div>
     </div>
+  );
+}
+
+/**
+ * What a repair cost, in money and in time. A manager's to record.
+ *
+ * Shown to everybody, because an engineer who can see what their repair
+ * cost learns something a form never tells them. Editable only by a
+ * manager or an administrator, at any stage — the invoice often arrives
+ * after the work order has closed, and recording it is not a change to
+ * anybody's account of the repair.
+ */
+function CostsCard({
+  workOrderId,
+  cost,
+  downtimeHours,
+  labourHours,
+  canRecord,
+}: {
+  workOrderId: string;
+  cost: string | null;
+  downtimeHours: number | null;
+  labourHours: string | null;
+  canRecord: boolean;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ cost: "", downtimeHours: "", labourHours: "" });
+  const [error, setError] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch(`/api/work-orders/${workOrderId}/costs`, {
+        // Empty clears the figure; a manager correcting a mistake has to
+        // be able to take one away, not only replace it.
+        cost: draft.cost === "" ? null : Number(draft.cost),
+        downtimeHours: draft.downtimeHours === "" ? null : Number(draft.downtimeHours),
+        labourHours: draft.labourHours === "" ? null : Number(draft.labourHours),
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      setError("");
+      qc.invalidateQueries({ queryKey: ["work-order", workOrderId] });
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Could not save."),
+  });
+
+  const start = () => {
+    setDraft({
+      cost: cost ?? "",
+      downtimeHours: downtimeHours === null ? "" : String(downtimeHours),
+      labourHours: labourHours ?? "",
+    });
+    setError("");
+    setEditing(true);
+  };
+
+  const shown = (value: string | number | null, unit: string) =>
+    value === null || value === "" ? "—" : `${value}${unit}`;
+
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-slate-800">Cost and time</h2>
+        {canRecord && !editing && (
+          <button
+            onClick={start}
+            className="flex cursor-pointer items-center gap-1 text-xs text-brand-700 transition hover:text-brand-900"
+          >
+            <Pencil size={12} /> Record
+          </button>
+        )}
+      </div>
+
+      {error && <p className="mb-2 text-xs text-rose-700">{error}</p>}
+
+      {editing ? (
+        <div className="space-y-2.5">
+          {(
+            [
+              ["cost", "Cost ($)", "1"],
+              ["downtimeHours", "Downtime (hours)", "1"],
+              ["labourHours", "Labour (hours)", "0.25"],
+            ] as const
+          ).map(([key, label, step]) => (
+            <label key={key} className="block">
+              <span className="text-xs uppercase tracking-wide text-slate-500">{label}</span>
+              <input
+                type="number"
+                min="0"
+                step={step}
+                value={draft[key]}
+                onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 font-mono text-sm outline-none focus:border-teal-500"
+              />
+            </label>
+          ))}
+          {/* Not the same as downtime: an hour of work can sit inside
+              three weeks of waiting for a part. */}
+          <p className="text-xs text-slate-400">Labour is engineer time, not downtime.</p>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+            <Button disabled={save.isPending} onClick={() => save.mutate()}>
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field label="Cost" mono>
+            {cost === null ? "—" : `$${Number(cost).toLocaleString()}`}
+          </Field>
+          <Field label="Downtime" mono>
+            {shown(downtimeHours, " h")}
+          </Field>
+          <Field label="Labour" mono>
+            {shown(labourHours, " h")}
+          </Field>
+          {!canRecord && cost === null && downtimeHours === null && labourHours === null && (
+            <p className="text-xs text-slate-400">Recorded by a manager.</p>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
