@@ -9,7 +9,14 @@
 export class ApiError extends Error {
   constructor(
     public status: number,
-    message: string
+    message: string,
+    /**
+     * The whole response, when it was JSON. Some refusals carry more than
+     * a sentence — a held-work refusal says how much work, and that is
+     * what distinguishes it from the other reasons the same request can
+     * be turned down.
+     */
+    public body: unknown = null
   ) {
     super(message);
   }
@@ -40,7 +47,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    throw new ApiError(res.status, data?.error ?? "Something went wrong.");
+    throw new ApiError(res.status, data?.error ?? "Something went wrong.", data);
   }
   return data as T;
 }

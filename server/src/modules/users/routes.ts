@@ -14,7 +14,7 @@
  */
 import { Router } from "express";
 import { z } from "zod";
-import { Prisma, Role } from "@prisma/client";
+import { Prisma, Role, type WorkOrderStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { requireAuth, requireRole } from "../../middleware/auth.js";
 import { recordAudit } from "../../lib/audit.js";
@@ -59,6 +59,32 @@ const PUBLIC_FIELDS = {
  * it would say somebody serviced a device before they were hired. Only
  * live obligations transfer.
  */
+/**
+ * Work orders that are over for the engineer, whatever happens next.
+ *
+ * COMPLETED belongs here, not with live work. The engineer has done the
+ * repair and written it up; what remains is the reviewer's, and the
+ * reviewer can accept it whatever the engineer's role or status has
+ * become since. Treating it as live had two effects, one of them serious.
+ * It blocked somebody from moving on until their last repair was signed
+ * off. And it let a handover move the repair to another engineer, who
+ * then became its engineer of record — so accepting it wrote their name
+ * into the device's permanent history for work somebody else did.
+ *
+ * Shared by the check that refuses to strand work and the handover that
+ * clears it. If those two disagreed about what counts, a handover could
+ * never clear the refusal it was offered to fix.
+ */
+const FINISHED_WORK: WorkOrderStatus[] = ["COMPLETED", "CLOSED", "CANCELLED"];
+
+/**
+ * Roles that can carry an engineer's work: be sent reminders for a
+ * device and act on them, and pick up and complete a repair. Anybody
+ * moving to a role outside this set would be left holding work the
+ * application will no longer let them do.
+ */
+const DOES_THE_WORK: Role[] = ["ENGINEER", "ADMIN"];
+
 async function liveWork(userId: string) {
   const [devices, alerts, workOrders] = await Promise.all([
     prisma.equipment.count({
@@ -68,7 +94,7 @@ async function liveWork(userId: string) {
       where: { assignedToId: userId, status: { notIn: ["RESOLVED", "CANCELLED"] } },
     }),
     prisma.workOrder.count({
-      where: { engineerId: userId, status: { notIn: ["CLOSED", "CANCELLED"] } },
+      where: { engineerId: userId, status: { notIn: FINISHED_WORK } },
     }),
   ]);
   return { devices, alerts, workOrders, total: devices + alerts + workOrders };
@@ -366,7 +392,7 @@ usersRouter.post(
         data: { assignedToId: to.id },
       }),
       prisma.workOrder.updateMany({
-        where: { engineerId: from.id, status: { notIn: ["CLOSED", "CANCELLED"] } },
+        where: { engineerId: from.id, status: { notIn: FINISHED_WORK } },
         data: { engineerId: to.id },
       }),
     ]);
@@ -460,14 +486,27 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
   }
 
   /**
-   * Nobody leaves holding live work.
+   * Nobody leaves holding live work — and nobody changes job holding it
+   * either.
    *
    * Deactivating an engineer who still watches devices does not stop the
    * reminders — it makes them silent, addressed to somebody who has
    * gone. So the work moves first, and the refusal says how much of it
    * there is rather than only that there is some.
+   *
+   * Changing someone's role out of the work is the same problem arriving
+   * by a different door, and that door was open. Two engineers were made
+   * managers while holding fifteen devices and three repairs between
+   * them. The repairs were stuck, because only engineers and
+   * administrators can complete one; and the devices went on sending
+   * maintenance reminders to people who could no longer act on them.
+   * Deactivation had always refused this, and a role change never checked.
    */
-  if (changes.isActive === false) {
+  const leaving = changes.isActive === false;
+  const changingJob =
+    !!changes.role && changes.role !== target.role && !DOES_THE_WORK.includes(changes.role);
+
+  if (leaving || changingJob) {
     const held = await liveWork(target.id);
     if (held.total > 0) {
       const parts = [
@@ -476,7 +515,9 @@ usersRouter.patch("/:id", requireAuth, requireRole("ADMIN", "MANAGER"), async (r
         held.workOrders && `${held.workOrders} open work order${held.workOrders === 1 ? "" : "s"}`,
       ].filter(Boolean);
       return res.status(409).json({
-        error: `Hand over their work first: ${parts.join(", ")}.`,
+        error: leaving
+          ? `Hand over their work first: ${parts.join(", ")}.`
+          : `Hand over their work before changing their role: ${parts.join(", ")}.`,
         workload: held,
       });
     }

@@ -72,7 +72,18 @@ export function Users() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   /** Set when a deactivation was refused because work is still held. */
-  const [leaving, setLeaving] = useState<{ person: Person; reason: string } | null>(null);
+  /*
+   * A refused edit that turns into a handover. Remembers what was being
+   * attempted, because handing the work over is only the means: the
+   * point was to close the account, or to change the role, and the page
+   * should finish that rather than make somebody ask twice.
+   */
+  const [leaving, setLeaving] = useState<{
+    person: Person;
+    reason: string;
+    changes: Record<string, unknown>;
+    purpose: "leave" | "role";
+  } | null>(null);
 
   const query = useQuery({
     queryKey: ["users"],
@@ -99,11 +110,29 @@ export function Users() {
       api.patch<Person>(`/api/users/${id}`, body),
     onSuccess: done,
     onError: (err, vars) => {
-      // The refusal to close an account holding live work is not an
-      // error to report and forget — it is the start of a handover.
+      /*
+       * A refusal over held work is not an error to report and forget —
+       * it is the start of a handover. Recognised by the workload the
+       * server sends with it, not guessed from what was asked: the same
+       * edit can be refused for other reasons, like somebody changing
+       * their own role, and those must not open a handover.
+       */
       const person = query.data?.rows.find((r) => r.id === vars.id);
-      if (err instanceof ApiError && err.status === 409 && person && vars.isActive === false) {
-        setLeaving({ person, reason: err.message });
+      const heldWork =
+        err instanceof ApiError &&
+        err.status === 409 &&
+        typeof err.body === "object" &&
+        err.body !== null &&
+        "workload" in err.body;
+
+      if (heldWork && person) {
+        const { id: _id, ...changes } = vars;
+        setLeaving({
+          person,
+          reason: err.message,
+          changes,
+          purpose: vars.isActive === false ? "leave" : "role",
+        });
         setError("");
         return;
       }
@@ -134,12 +163,20 @@ export function Users() {
   });
 
   const handover = useMutation({
-    mutationFn: async ({ fromId, toId }: { fromId: string; toId: string }) => {
+    mutationFn: async ({
+      fromId,
+      toId,
+      changes,
+    }: {
+      fromId: string;
+      toId: string;
+      changes: Record<string, unknown>;
+    }) => {
       await api.post(`/api/users/${fromId}/handover`, { toId });
-      // The handover is the point, but closing the account is what was
-      // being attempted — so finish the job rather than leaving somebody
-      // to press the same button again.
-      await api.patch(`/api/users/${fromId}`, { isActive: false });
+      // The handover is the means. Whatever was being attempted — closing
+      // the account or changing the role — is the job, so finish it
+      // rather than leaving somebody to press the same button again.
+      await api.patch(`/api/users/${fromId}`, changes);
     },
     onSuccess: done,
     onError: (err) =>
@@ -201,10 +238,13 @@ export function Users() {
         <Handover
           person={leaving.person}
           reason={leaving.reason}
+          purpose={leaving.purpose}
           engineers={engineers.filter((e) => e.id !== leaving.person.id)}
           busy={handover.isPending}
           onCancel={() => setLeaving(null)}
-          onConfirm={(toId) => handover.mutate({ fromId: leaving.person.id, toId })}
+          onConfirm={(toId) =>
+            handover.mutate({ fromId: leaving.person.id, toId, changes: leaving.changes })
+          }
         />
       )}
 
@@ -363,6 +403,7 @@ export function Users() {
  * that still holds work — which is when they are thinking about it.
  */
 function Handover({
+  purpose,
   person,
   reason,
   engineers,
@@ -370,6 +411,7 @@ function Handover({
   onCancel,
   onConfirm,
 }: {
+  purpose: "leave" | "role";
   person: Person;
   reason: string;
   engineers: Person[];
@@ -381,7 +423,11 @@ function Handover({
 
   return (
     <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-      <div className="text-sm font-medium text-amber-900">{person.fullName} cannot leave yet</div>
+      <div className="text-sm font-medium text-amber-900">
+        {purpose === "leave"
+          ? `${person.fullName} cannot leave yet`
+          : `${person.fullName}'s role cannot change yet`}
+      </div>
       <p className="mt-1 text-sm text-amber-900">{reason}</p>
       <p className="mt-2 max-w-2xl text-xs leading-relaxed text-amber-800">
         Their completed services stay theirs — that is the record of who did the work. Only the
@@ -408,7 +454,10 @@ function Handover({
             ))}
           </select>
           <Button onClick={() => onConfirm(toId)} disabled={busy || !toId}>
-            <Check size={13} /> Hand over and close the account
+            <Check size={13} />{" "}
+            {purpose === "leave"
+              ? "Hand over and close the account"
+              : "Hand over and change the role"}
           </Button>
           <Button variant="ghost" onClick={onCancel} disabled={busy}>
             Cancel

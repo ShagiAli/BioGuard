@@ -83,6 +83,48 @@ async function someoneInUse(role: "ENGINEER" | "HEAD_OF_ENGINEERING", tag: strin
   return user;
 }
 
+async function assignedAlert(priority = "MEDIUM") {
+  const nurse = await login(seeded.nurseEmail);
+  const created = await request(app)
+    .post("/api/alerts")
+    .set("Cookie", nurse)
+    .send({ equipmentId: seeded.ownDeviceId, description: "Will not power on.", priority })
+    .expect(201);
+
+  const head = await login(seeded.headEmail);
+  await request(app).post(`/api/alerts/${created.body.id}/acknowledge`).set("Cookie", head);
+
+  const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
+  await request(app)
+    .post(`/api/alerts/${created.body.id}/assign`)
+    .set("Cookie", head)
+    .send({ engineerId: engineer.id })
+    .expect(200);
+
+  return created.body;
+}
+
+async function awaitingReview(priority = "MEDIUM") {
+  const alert = await assignedAlert(priority);
+  const engineer = await login(seeded.engineerEmail);
+  const wo = await request(app)
+    .post("/api/work-orders")
+    .set("Cookie", engineer)
+    .send({ alertId: alert.id })
+    .expect(201);
+
+  await prisma.sentEmail.deleteMany();
+  await prisma.notification.deleteMany();
+
+  await request(app)
+    .patch(`/api/work-orders/${wo.body.id}`)
+    .set("Cookie", engineer)
+    .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" })
+    .expect(200);
+
+  return { id: wo.body.id as string, engineer };
+}
+
 async function aManager() {
   const manager = await prisma.user.upsert({
     where: { email: "people.manager@test.local" },
@@ -832,26 +874,6 @@ describe("alerts", () => {
 
 describe("work orders", () => {
   /** Raise, acknowledge and assign, returning an alert ready for an engineer. */
-  async function assignedAlert(priority = "MEDIUM") {
-    const nurse = await login(seeded.nurseEmail);
-    const created = await request(app)
-      .post("/api/alerts")
-      .set("Cookie", nurse)
-      .send({ equipmentId: seeded.ownDeviceId, description: "Will not power on.", priority })
-      .expect(201);
-
-    const head = await login(seeded.headEmail);
-    await request(app).post(`/api/alerts/${created.body.id}/acknowledge`).set("Cookie", head);
-
-    const engineer = await prisma.user.findFirstOrThrow({ where: { email: seeded.engineerEmail } });
-    await request(app)
-      .post(`/api/alerts/${created.body.id}/assign`)
-      .set("Cookie", head)
-      .send({ engineerId: engineer.id })
-      .expect(200);
-
-    return created.body;
-  }
 
   it("opening a work order starts the alert and marks the device under repair", async () => {
     const alert = await assignedAlert();
@@ -1013,26 +1035,6 @@ describe("work orders", () => {
   // ---------------------------------------------------------- review
 
   /** A completed repair, sitting in front of the head who must accept it. */
-  async function awaitingReview(priority = "MEDIUM") {
-    const alert = await assignedAlert(priority);
-    const engineer = await login(seeded.engineerEmail);
-    const wo = await request(app)
-      .post("/api/work-orders")
-      .set("Cookie", engineer)
-      .send({ alertId: alert.id })
-      .expect(201);
-
-    await prisma.sentEmail.deleteMany();
-    await prisma.notification.deleteMany();
-
-    await request(app)
-      .patch(`/api/work-orders/${wo.body.id}`)
-      .set("Cookie", engineer)
-      .send({ repairActions: "Replaced the faulty board.", status: "COMPLETED" })
-      .expect(200);
-
-    return { id: wo.body.id as string, engineer };
-  }
 
   it("will not let an engineer sign off their own repair", async () => {
     const { id, engineer } = await awaitingReview();
@@ -2660,6 +2662,107 @@ describe("managing people", () => {
       .expect(200);
 
     await prisma.user.update({ where: { id: leaver.id }, data: { isActive: true } });
+  });
+
+  it("will not change somebody's job while they hold work only that job can do", async () => {
+    const admin = await login(seeded.adminEmail);
+    const engineer = await someoneInUse("ENGINEER", "rolechange");
+
+    // A repair under way, held by them — a row of this test's own.
+    const { id } = await awaitingReview();
+    await prisma.workOrder.update({
+      where: { id },
+      data: { engineerId: engineer.id, status: "IN_REPAIR" },
+    });
+
+    /*
+     * The gap: deactivation always refused this, and a role change never
+     * checked. Made a manager, they would hold a repair only engineers and
+     * administrators can finish, and go on being sent reminders for
+     * devices they can no longer service.
+     */
+    const refused = await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", admin)
+      .send({ role: "MANAGER" })
+      .expect(409);
+
+    expect(refused.body.error).toContain("before changing their role");
+    expect(refused.body.workload.workOrders).toBe(1);
+
+    // Hand it over, and the change goes through.
+    const taker = await someoneInUse("ENGINEER", "rolechange.taker");
+    await request(app)
+      .post(`/api/users/${engineer.id}/handover`)
+      .set("Cookie", admin)
+      .send({ toId: taker.id })
+      .expect(200);
+
+    await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", admin)
+      .send({ role: "MANAGER" })
+      .expect(200);
+  });
+
+  it("lets somebody become an administrator without handing anything over", async () => {
+    const admin = await login(seeded.adminEmail);
+    const engineer = await someoneInUse("ENGINEER", "toadmin");
+
+    const { id } = await awaitingReview();
+    await prisma.workOrder.update({
+      where: { id },
+      data: { engineerId: engineer.id, status: "IN_REPAIR" },
+    });
+
+    // An administrator can still complete repairs, so nothing is stranded.
+    await request(app)
+      .patch(`/api/users/${engineer.id}`)
+      .set("Cookie", admin)
+      .send({ role: "ADMIN" })
+      .expect(200);
+  });
+
+  it("leaves a finished repair with the engineer who did it", async () => {
+    const admin = await login(seeded.adminEmail);
+    const doer = await someoneInUse("ENGINEER", "doer");
+    const taker = await someoneInUse("ENGINEER", "doer.taker");
+
+    // Finished and written up, waiting only for the reviewer.
+    const { id } = await awaitingReview();
+    await prisma.workOrder.update({ where: { id }, data: { engineerId: doer.id } });
+
+    // It holds nobody back: the reviewer can accept it whatever becomes of them.
+    const work = await request(app)
+      .get(`/api/users/${doer.id}/workload`)
+      .set("Cookie", admin)
+      .expect(200);
+    expect(work.body.workOrders).toBe(0);
+
+    await request(app)
+      .post(`/api/users/${doer.id}/handover`)
+      .set("Cookie", admin)
+      .send({ toId: taker.id })
+      .expect(200);
+
+    /*
+     * Not moved. The maintenance record credits the work order's
+     * engineer, so handing this over would have written the taker's name
+     * into the device's permanent history for a repair they never did.
+     */
+    const kept = await prisma.workOrder.findUniqueOrThrow({ where: { id } });
+    expect(kept.engineerId).toBe(doer.id);
+
+    const closed = await request(app)
+      .post(`/api/work-orders/${id}/close`)
+      .set("Cookie", await login(seeded.reviewerEmail))
+      .send({ finalResolution: "Back in service." })
+      .expect(200);
+
+    const record = await prisma.maintenanceRecord.findUniqueOrThrow({
+      where: { id: closed.body.maintenanceRecordId },
+    });
+    expect(record.engineerId).toBe(doer.id);
   });
 
   it("hands work only to an active engineer", async () => {
