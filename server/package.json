@@ -40,25 +40,25 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "qrcode": "1.5.4",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
-    "@types/node": "22.20.1",
+    "@types/node": "22.20.4",
     "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.2.1",
     "cross-env": "^10.1.0",
-    "eslint": "^10.10.0",
-    "prettier": "^3.4.2",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
     "prisma": "^7.10.0",
-    "supertest": "^7.0.0",
-    "tsx": "^4.23.13",
+    "supertest": "^7.3.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.69.0",
-    "vitest": "^5.0.0"
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.1"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.0"
